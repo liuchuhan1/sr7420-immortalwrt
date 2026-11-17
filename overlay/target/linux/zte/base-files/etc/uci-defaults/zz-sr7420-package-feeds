@@ -1,0 +1,25 @@
+#!/bin/sh
+# SR7420 package feeds: run once after the distribution's mirror defaults.
+set -eu
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null || true)" = "zte,zx279133-sr7420" ] || exit 0
+[ "$(uci -q get 'system.@imm_init[0].sr7420_package_feeds_version' || true)" != "1" ] || exit 0
+mkdir -p /etc/apk/repositories.d
+if [ -f /etc/apk/repositories.d/distfeeds.list ] && [ ! -e /etc/apk/repositories.d/distfeeds.list.sr7420-before ]; then
+ cp -p /etc/apk/repositories.d/distfeeds.list /etc/apk/repositories.d/distfeeds.list.sr7420-before
+fi
+cat >/etc/apk/repositories.d/distfeeds.list.sr7420-new <<'SR7420_FEEDS'
+# ImmortalWrt 25.12.1: architecture-independent/user-space repositories.
+# Custom zte/zx279133 kernel modules must come from this exact SR7420 build.
+https://mirrors.vsean.net/immortalwrt/releases/25.12.1/packages/aarch64_cortex-a53/base/packages.adb
+https://mirrors.vsean.net/immortalwrt/releases/25.12.1/packages/aarch64_cortex-a53/luci/packages.adb
+https://mirrors.vsean.net/immortalwrt/releases/25.12.1/packages/aarch64_cortex-a53/packages/packages.adb
+https://mirrors.vsean.net/immortalwrt/releases/25.12.1/packages/aarch64_cortex-a53/routing/packages.adb
+https://mirrors.vsean.net/immortalwrt/releases/25.12.1/packages/aarch64_cortex-a53/telephony/packages.adb
+SR7420_FEEDS
+chmod 644 /etc/apk/repositories.d/distfeeds.list.sr7420-new
+mv /etc/apk/repositories.d/distfeeds.list.sr7420-new /etc/apk/repositories.d/distfeeds.list
+if ! uci -q get 'system.@imm_init[0]' >/dev/null; then uci add system imm_init >/dev/null; fi
+uci set 'system.@imm_init[0].apk_mirror=https://mirrors.vsean.net/immortalwrt'
+uci set 'system.@imm_init[0].sr7420_package_feeds_version=1'
+uci commit system
+exit 0

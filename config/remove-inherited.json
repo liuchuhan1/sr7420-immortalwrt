@@ -1,0 +1,14 @@
+[
+  "target/linux/zte/zx279133/base-files/lib/apk/config",
+  "target/linux/zte/zx279133/base-files/usr/sbin/sr1010-netled",
+  "target/linux/zte/zx279133/base-files/etc/init.d/sr1010-netled",
+  "target/linux/zte/zx279133/base-files/etc/config/sr1010-netled",
+  "target/linux/zte/dts/zx279133-sr1010-openwrt.dts",
+  "target/linux/zte/mkfw/sr1010-mkfw.py",
+  "package/utils/zte-sr1010-board",
+  "target/linux/zte/zx279133/base-files/etc/uci-defaults/98-sr1010-defaults",
+  "target/linux/zte/zx279133/base-files/etc/uci-defaults/99-sr1010-netled",
+  "target/linux/zte/zx279133/base-files/etc/uci-defaults/99-zx279133-mwan3",
+  "target/linux/zte/zx279133/base-files/etc/uci-defaults/99-zx279133-theme",
+  "target/linux/zte/zx279133/base-files/etc/board.d/01_leds"
+]

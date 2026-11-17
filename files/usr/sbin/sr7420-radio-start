@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+[ -d /sys/module/ath12k ] && exit 0
+FW=/lib/firmware/ath12k/QCN9274/hw2.0
+for f in firmware-2.bin board-2.bin cal-pci-0001:01:00.0.bin cal-pci-0000:01:00.0.bin; do
+ [ -s "$FW/$f" ] || { echo "Missing per-device stock import: $f"; exit 1; }
+done
+for m in compat cfg80211 mac80211 qmi_helpers pci-zx279133-warm; do modprobe "$m"; done
+for d in 0001:01:00.0 0000:01:00.0; do
+ [ -e "/sys/bus/pci/devices/$d/driver_override" ]
+ echo none >"/sys/bus/pci/devices/$d/driver_override"
+done
+modprobe ath12k sr7420_survey64=1 sr7420_wsi_pair_diag=1 sr7420_mlo_setup_fixed16=0 sr7420_mlo_peer_limit=137 sr7420_fw_bridge=1 sr7420_stock_params=1 sr7420_no_caldb=1 sr7420_start_stock_bcnrate=0 sr7420_ini_download=1 sr7420_mem_mode=1 sr7420_start_from_conf=1 sr7420_defer_ap_start=1 sr7420_start_he_ops=3 sr7420_start_fixed132=0 sr7420_start_regdomain=4 sr7420_start_tail=0 sr7420_diag_payload=0 debug_mask=0
+# Stock evidence: PCIe1 is 2.4 GHz; PCIe0 is 5 GHz. WSI groups them on one wiphy.
+for d in 0001:01:00.0 0000:01:00.0; do
+ printf '\n' >"/sys/bus/pci/devices/$d/driver_override"
+ echo "$d" >/sys/bus/pci/drivers/ath12k_pci/bind
+done

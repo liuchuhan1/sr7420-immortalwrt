@@ -1,0 +1,311 @@
+#!/bin/sh
+# SR7420 USB installer/launcher. Format only an explicitly authorized USB serial.
+# No MTD, U-Boot environment, or firmware-slot writes are performed.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+RELEASE=sr7420-usb44
+DEFAULT_URL=__BUNDLE_URL__
+DEFAULT_SHA=__BUNDLE_SHA256__
+case "$0" in */*) SELF_BASE=${0%/*};; *) SELF_BASE=.;; esac
+SELF_DIR=$(CDPATH= cd "$SELF_BASE" && pwd)
+CMD=${1:-install}; [ $# -eq 0 ] || shift
+DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 WORK_MOUNTED=0
+WORK= BM= RM= LOCKED=0
+log() { printf '%s\n' "SR7420-USB: $*"; }
+die() { log "ERROR: $*" >&2; exit 1; }
+usage() {
+ cat <<'EOF'
+Usage:
+  sh sr7420-usb.sh detect
+  sh sr7420-usb.sh install --device /dev/sda --serial SERIAL --erase [--offline FILE]
+  sh sr7420-usb.sh install --serial SERIAL --erase --url HTTPS_URL --sha256 SHA256
+  sh sr7420-usb.sh verify --device /dev/sda
+  sh sr7420-usb.sh boot --device /dev/sda [--load-only]
+Options:
+  --offline FILE        Verified offline bundle; preferred when supplied.
+  --url URL             Download only when no valid USB system exists.
+  --sha256 HASH         Expected bundle SHA-256 from a trusted source.
+  --allow-local-http    Allow plain HTTP only to a private IPv4/localhost host.
+  --erase               Permit partitioning/formatting if no valid system exists.
+  --serial SERIAL       Required identity match before any destructive operation.
+  --boot                After installation, boot when running the stock kernel.
+  --retry               Retry a previous failed USB boot; automatic retries are blocked.
+The default offline bundle is next to this script. An installed valid system is
+reused without formatting or downloading. Booting requires stock Linux 5.4.196.
+EOF
+}
+while [ $# -gt 0 ]; do
+ case "$1" in
+  --device) [ $# -ge 2 ] || die 'missing device'; DEV=$2; shift 2;;
+  --serial) [ $# -ge 2 ] || die 'missing serial'; SERIAL=$2; shift 2;;
+  --offline) [ $# -ge 2 ] || die 'missing bundle'; OFFLINE=$2; shift 2;;
+  --url) [ $# -ge 2 ] || die 'missing URL'; URL=$2; shift 2;;
+  --sha256) [ $# -ge 2 ] || die 'missing SHA-256'; WANT_SHA=$2; shift 2;;
+  --erase) ERASE=1; shift;;
+  --allow-local-http) HTTP_LOCAL=1; shift;;
+  --load-only) LOAD_ONLY=1; shift;;
+  --boot) BOOT_AFTER=1; shift;;
+  --retry) RETRY=1; shift;;
+  -h|--help) usage; exit 0;;
+  *) die "unknown option $1";;
+ esac
+done
+case "$CMD" in detect|install|verify|boot) :;; -h|--help|help) usage; exit 0;; *) usage; exit 1;; esac
+[ "$(id -u)" = 0 ] || die 'run as root'
+[ -d /sys/class/block ] || die 'sysfs is required'
+[ -r /proc/self/mountinfo ] || die 'mountinfo is required'
+cleanup() {
+ set +e
+ [ -z "$RM" ] || umount "$RM" 2>/dev/null
+ [ -z "$BM" ] || umount "$BM" 2>/dev/null
+ # WORK is a new PID-named directory, never supplied by users.
+ case "$WORK" in /var/sr7420-usb-work.*)
+  if [ "$WORK_MOUNTED" = 1 ]; then umount "$WORK" || return; fi
+  rmdir "$WORK" 2>/dev/null;; esac
+ [ "$LOCKED" = 0 ] || rmdir /tmp/sr7420-usb.lock 2>/dev/null
+}
+trap cleanup EXIT HUP INT TERM
+serial_of() {
+ p=$(readlink -f "/sys/class/block/$1/device")
+ while [ "$p" != / ] && [ -n "$p" ]; do
+  if [ -r "$p/serial" ]; then tr -d '\r\n' <"$p/serial"; return; fi
+  p=${p%/*}; [ -n "$p" ] || p=/
+ done
+}
+is_usb() {
+ [ -d "/sys/class/block/$1" ] && [ ! -e "/sys/class/block/$1/partition" ] || return 1
+ case "$(readlink -f "/sys/class/block/$1/device")" in */usb[0-9]*/*) :;; *) return 1;; esac
+ [ "$(cat "/sys/class/block/$1/removable")" = 1 ] || return 1
+}
+list_usb() {
+ FOUND= COUNT=0
+ for x in /sys/class/block/sd*; do
+  [ -e "$x" ] || continue
+  d=${x##*/}; is_usb "$d" || continue
+  z=$(cat "$x/size"); sn=$(serial_of "$d")
+  vendor=$(tr -d '\r\n' <"$x/device/vendor")
+  model=$(tr -d '\r\n' <"$x/device/model")
+  log "USB device=/dev/$d serial=$sn sectors=$z vendor=$vendor model=$model"
+  FOUND=/dev/$d; COUNT=$((COUNT+1))
+ done
+}
+list_usb
+[ "$COUNT" -gt 0 ] || die 'no removable USB disk detected; no disk has been changed'
+[ "$CMD" != detect ] || exit 0
+if [ -z "$DEV" ]; then [ "$COUNT" -eq 1 ] || die 'multiple USB disks; specify --device'; DEV=$FOUND; fi
+case "$DEV" in /dev/sd[a-z]) :;; *) die 'only a whole /dev/sdX USB disk is accepted';; esac
+DISK=${DEV##*/}; is_usb "$DISK" || die "$DEV is not a removable USB disk"
+ACTUAL_SERIAL=$(serial_of "$DISK")
+[ -n "$ACTUAL_SERIAL" ] || die 'USB serial unavailable; cannot safely identify target'
+[ -z "$SERIAL" ] || [ "$SERIAL" = "$ACTUAL_SERIAL" ] || die 'USB serial does not match'
+[ "$(cat "/sys/class/block/$DISK/ro")" = 0 ] || die 'USB disk is read-only'
+[ "$(cat "/sys/class/block/$DISK/queue/logical_block_size")" = 512 ] || die '512-byte sectors required'
+SECTORS=$(cat "/sys/class/block/$DISK/size")
+[ "$SECTORS" -ge 2097152 ] && [ "$SECTORS" -le 2147483647 ] || die 'supported USB capacity: 1 GiB to 1 TiB'
+ensure_node() {
+ name=$1
+ [ -r "/sys/class/block/$name/dev" ] || return 1
+ mm=$(cat "/sys/class/block/$name/dev")
+ [ -b "/dev/$name" ] || mknod "/dev/$name" b "${mm%:*}" "${mm#*:}"
+}
+ensure_node "$DISK" || die 'USB device node missing'
+assert_not_mounted() {
+ for x in "/sys/class/block/$DISK" /sys/class/block/"$DISK"[0-9]*; do
+  [ -e "$x" ] || continue
+  mm=$(cat "$x/dev")
+  awk -v mm="$mm" '$3==mm { found=1 } END { exit !found }' /proc/self/mountinfo && die "$DEV or its partitions are mounted; refusing operation"
+  for holder in "$x"/holders/*; do [ ! -e "$holder" ] || die 'USB is used by another block device'; done
+  if [ -r /proc/swaps ]; then
+   while read swap rest; do case "$swap" in "$DEV"|"$DEV"[0-9]*) die 'USB contains active swap';; esac; done </proc/swaps
+  fi
+ done
+}
+assert_not_mounted
+mkdir /tmp/sr7420-usb.lock 2>/dev/null || die 'another installer/launcher is running'
+LOCKED=1
+# Stock /tmp is only 20 MiB. Use a separate bounded RAM workspace.
+MEM_KB=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+[ -n "$MEM_KB" ] && [ "$MEM_KB" -ge 262144 ] || die 'at least 256 MiB available RAM is required; disk unchanged'
+WORK=/var/sr7420-usb-work.$$
+mkdir -m 700 "$WORK" || die 'cannot create a private work directory'
+mount -t tmpfs -o size=196608k,mode=700 tmpfs "$WORK" || die 'cannot allocate RAM workspace'
+WORK_MOUNTED=1
+mkdir "$WORK/boot" "$WORK/root"
+HASH_TOOL=
+if command -v sha256sum >/dev/null 2>&1; then HASH_TOOL=$(command -v sha256sum)
+elif [ -x "$SELF_DIR/sha256" ]; then HASH_TOOL=$SELF_DIR/sha256
+else die 'sha256sum or the supplied static sha256 tool is required'; fi
+hash_file() { "$HASH_TOOL" "$1" | awk '{print $1}'; }
+# Static helper has no --check; validate known single-file hashes explicitly.
+verify_manifest() {
+ base=$1; manifest=$2
+ [ -s "$manifest" ] || return 1
+ while read digest name extra; do
+  [ -z "${extra:-}" ] || return 1
+  case "$digest" in *[!0-9a-f]*|'') return 1;; esac
+  [ "${#digest}" -eq 64 ] || return 1
+  case "$name" in /*|*..*|'') return 1;; esac
+  [ -f "$base/$name" ] || return 1
+  [ "$(hash_file "$base/$name")" = "$digest" ] || return 1
+ done <"$manifest"
+}
+unmount_ours() {
+ [ -z "$RM" ] || { umount "$RM"; RM=; }
+ [ -z "$BM" ] || { umount "$BM"; BM=; }
+}
+probe_installed() {
+ ensure_node "${DISK}1" && ensure_node "${DISK}2" || return 1
+ mount -t ext4 -o ro,noload "${DEV}1" "$WORK/boot" 2>/dev/null || return 1
+ BM=$WORK/boot
+ [ "$(cat "$BM/release-id" 2>/dev/null)" = "$RELEASE" ] || return 1
+ [ "$(cat "$BM/usb-serial" 2>/dev/null)" = "$ACTUAL_SERIAL" ] || return 1
+ verify_manifest "$BM" "$BM/boot.sha256" || return 1
+ verify_manifest "$BM" "$BM/device.sha256" || return 1
+ mount -t ext4 -o ro,noload "${DEV}2" "$WORK/root" 2>/dev/null || return 1
+ RM=$WORK/root
+ [ "$(cat "$RM/etc/sr7420-usb-release" 2>/dev/null)" = "$RELEASE" ] || return 1
+ verify_manifest "$RM" "$BM/root.sha256" || return 1
+ verify_manifest "$RM" "$RM/etc/sr7420-device.sha256" || return 1
+ [ -x "$RM/sbin/init" ] && [ -x "$RM/usr/sbin/sr7420-ram-init" ] || return 1
+}
+INSTALLED=0
+if probe_installed; then INSTALLED=1; log "verified existing $RELEASE; no download or format needed"
+else log 'no complete, verified USB system found'; fi
+if [ "$CMD" = verify ]; then [ "$INSTALLED" = 1 ] || die 'USB system verification failed'; exit 0; fi
+if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
+ unmount_ours
+ [ "$ERASE" = 1 ] || die 'installation requires --erase; nothing has been erased'
+ [ -n "$SERIAL" ] && [ "$SERIAL" = "$ACTUAL_SERIAL" ] || die 'formatting requires the matching --serial'
+ if [ -z "$OFFLINE" ] && [ -f "$SELF_DIR/sr7420-usb44-offline.tar.gz" ]; then OFFLINE=$SELF_DIR/sr7420-usb44-offline.tar.gz; fi
+ if [ -n "$OFFLINE" ]; then
+  [ -f "$OFFLINE" ] || die 'offline bundle missing; refusing fallback or erasure'
+  BUNDLE=$OFFLINE; log 'using offline bundle'
+ else
+  [ -n "$URL" ] || URL=$DEFAULT_URL
+  case "$URL" in __*) die 'this source template is not a built installer; USB unchanged';; esac
+  [ -n "$URL" ] || die 'no offline bundle and no --url supplied; USB unchanged' 
+  case "$URL" in
+   https://*) :;;
+   http://*)
+    [ "$HTTP_LOCAL" = 1 ] || die 'plain HTTP requires --allow-local-http'
+    host=${URL#http://}; host=${host%%/*}; host=${host%%:*}
+    case "$host" in 192.168.*|10.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|127.0.0.1|localhost) :;; *) die 'HTTP is allowed only for a local/private IPv4 server';; esac;;
+   *) die 'an HTTPS download URL is required';;
+  esac
+  [ -n "$WANT_SHA" ] || die 'online downloads require --sha256'
+  BUNDLE=$WORK/download.tar.gz
+  log 'downloading bundle before touching the USB disk'
+  if [ -x "$SELF_DIR/tools/bin/curl" ]; then
+   curl_fetch() { "$SELF_DIR/tools/lib/ld-musl-aarch64.so.1" --library-path "$SELF_DIR/tools/lib" "$SELF_DIR/tools/bin/curl" "$@"; }
+  elif command -v curl >/dev/null 2>&1; then
+   curl_fetch() { curl "$@"; }
+  else die 'verified TLS curl runtime is required; USB unchanged'; fi
+  protocol='=https'; [ "$HTTP_LOCAL" = 0 ] || protocol='=http,https'
+  curl_fetch --fail --location --proto "$protocol" --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 600 --max-filesize 67108864 -o "$BUNDLE.part" "$URL"
+  mv "$BUNDLE.part" "$BUNDLE"
+ fi
+ [ -n "$WANT_SHA" ] || WANT_SHA=$DEFAULT_SHA
+ [ "${#WANT_SHA}" = 64 ] || die 'expected bundle SHA-256 is not configured'
+ [ "$(hash_file "$BUNDLE")" = "$WANT_SHA" ] || die 'bundle checksum mismatch; USB unchanged'
+ tar tzf "$BUNDLE" >"$WORK/archive.names"
+ awk '/^\// || /(^|\/)\.\.(\/|$)/ {bad=1} END {exit bad}' "$WORK/archive.names" || die 'unsafe archive path'
+ mkdir "$WORK/unpack"
+ tar xzf "$BUNDLE" -C "$WORK/unpack"
+ PAYLOAD=$WORK/unpack
+ [ "$(cat "$PAYLOAD/release-id")" = "$RELEASE" ] || die 'bundle is for another release'
+ verify_manifest "$PAYLOAD" "$PAYLOAD/bundle.sha256" || die 'bundle payload verification failed'
+ TOOLS=$PAYLOAD/tools
+ tool() { binary=$1; shift; "$TOOLS/lib/ld-musl-aarch64.so.1" --library-path "$TOOLS/lib" "$TOOLS/bin/$binary" "$@"; }
+ tool sfdisk --version
+ tool mke2fs -V
+ # Validate per-device stock inputs and construct a local DTB before erasing USB.
+ [ "$(uname -r)" = 5.4.196 ] || die 'automatic stock-data import requires validated stock kernel'
+ tr -d '\000' </proc/device-tree/model | grep -q SR7420 || die 'not an SR7420'
+ mkdir "$WORK/device-firmware"
+ cp "$PAYLOAD/boot/board-template.dtb" "$WORK/device-board.dtb"
+ "$TOOLS/bin/stock-import" /lib/firmware/qcn9224 "$WORK/device-firmware" "$WORK/device-board.dtb" /sys/class/net/eth0/address
+ assert_not_mounted
+ [ "$(serial_of "$DISK")" = "$SERIAL" ] || die 'USB identity changed during download'
+ [ "$(cat "/sys/class/block/$DISK/size")" = "$SECTORS" ] || die 'USB capacity changed'
+ log "ERASING $DEV serial=$SERIAL; 128 MiB boot + remaining space writable ext4 root"
+ printf 'label: dos\nunit: sectors\n\nstart=2048,size=262144,type=83\nstart=264192,type=83\n' | tool sfdisk --wipe always --wipe-partitions always "$DEV"
+ n=0
+ until ensure_node "${DISK}1" && ensure_node "${DISK}2"; do n=$((n+1)); [ "$n" -le 15 ] || die 'partition nodes did not appear'; sleep 1; done
+ [ "$(cat "/sys/class/block/${DISK}1/start")" = 2048 ] || die 'boot partition start mismatch'
+ [ "$(cat "/sys/class/block/${DISK}1/size")" = 262144 ] || die 'boot partition size mismatch'
+ [ "$(cat "/sys/class/block/${DISK}2/start")" = 264192 ] || die 'root partition start mismatch'
+ export MKE2FS_CONFIG=$TOOLS/mke2fs.conf
+ for i in 1 2; do
+  label=SR7420BOOT; [ "$i" = 1 ] || label=SR7420ROOT
+  tool mke2fs -t ext4 -F -L "$label" -m 0 -E lazy_itable_init=0,lazy_journal_init=0 "${DEV}$i"
+ done
+ mount -t ext4 "${DEV}1" "$WORK/boot"; BM=$WORK/boot
+ mount -t ext4 "${DEV}2" "$WORK/root"; RM=$WORK/root
+ tar xzf "$PAYLOAD/rootfs.tar.gz" -C "$RM"
+ cp -a "$PAYLOAD/boot/." "$BM/"
+ cp "$PAYLOAD/root.sha256" "$BM/root.sha256"
+ FW_REL=lib/firmware/ath12k/QCN9274/hw2.0
+ mkdir -p "$RM/$FW_REL"
+ cp -a "$WORK/device-firmware/." "$RM/$FW_REL/"
+ cp "$WORK/device-board.dtb" "$BM/board.dtb"
+ printf '%s  board.dtb\n' "$(hash_file "$BM/board.dtb")" >"$BM/device.sha256"
+ : >"$RM/etc/sr7420-device.sha256"
+ for f in "$RM/$FW_REL/"*; do
+  printf '%s  %s/%s\n' "$(hash_file "$f")" "$FW_REL" "${f##*/}" >>"$RM/etc/sr7420-device.sha256"
+ done
+ printf '%s\n' "$DISK" >"$RM/etc/sr7420-usb-disk"
+
+ verify_manifest "$RM" "$BM/root.sha256" || die 'USB root read-back verification failed'
+ verify_manifest "$BM" "$BM/boot.sha256" || die 'USB boot read-back verification failed'
+ printf '%s\n' "$RELEASE" >"$RM/etc/sr7420-usb-release"
+ printf '%s\n' "$ACTUAL_SERIAL" >"$RM/etc/sr7420-usb-serial"
+ printf '%s\n' "$ACTUAL_SERIAL" >"$BM/usb-serial"
+ printf '%s\n' "$RELEASE" >"$BM/release-id"
+ sync
+ unmount_ours
+ probe_installed || die 'post-install remount verification failed'
+ INSTALLED=1; log 'installation complete; USB data and boot files verified'
+fi
+if [ "$CMD" = install ] && [ "$BOOT_AFTER" = 0 ]; then
+ log 'ready; invoke the boot command from the stock system to switch kernels'
+ exit 0
+fi
+[ "$INSTALLED" = 1 ] || die 'no valid USB system; run install first'
+[ "$COUNT" = 1 ] || die 'boot currently requires exactly one removable USB disk'
+[ "$(uname -r)" = 5.4.196 ] || die 'boot currently supports only the validated stock 5.4.196 handover'
+if [ -e "$BM/boot-pending" ] && [ "$RETRY" = 0 ]; then die 'previous USB boot was not confirmed ready; stock system retained (manual --retry required)'; fi
+[ "$(cat /sys/kernel/kexec_loaded)" = 0 ] || die 'a kernel is already loaded; refusing to replace it'
+# The loader must remain executable after unmounting the USB partitions.
+STAGE=/var/sr7420-usb-boot
+[ ! -e "$STAGE" ] || die 'loader stage already exists; inspect before reusing'
+awk '$2=="/var" && $3=="tmpfs" {ok=1} END {exit !ok}' /proc/mounts || die '/var must be tmpfs'
+mkdir -m 700 "$STAGE"
+cp -a "$BM/." "$STAGE/"
+verify_manifest "$STAGE" "$STAGE/boot.sha256" || die 'loader-stage checksum mismatch'
+verify_manifest "$STAGE" "$STAGE/device.sha256" || die 'device DTB checksum mismatch' 
+CMDLINE="console=ttyAMA0,115200n8 earlycon=sr7420ram,mmio,0xb52f0000 keep_bootcon loglevel=6 nosmp panic=15 sr7420_usb_serial=$ACTUAL_SERIAL"
+"$STAGE/kexec" -c -l "$STAGE/Image" --dtb="$STAGE/board.dtb"
+[ "$(cat /sys/kernel/kexec_loaded)" = 1 ] || die 'kexec did not load'
+log 'USB kernel and DTB loaded into RAM'
+[ "$LOAD_ONLY" = 0 ] || exit 0
+mount -o remount,rw "$BM" || die 'cannot mark USB boot as pending'
+printf '%s\n' "$RELEASE" >"$BM/boot-pending"
+sync
+unmount_ours
+# Tested stock WLAN teardown, with an independent old-kernel recovery deadline.
+busybox setsid sh -c 'sleep 120; echo b >/proc/sysrq-trigger' </dev/null >"$STAGE/stock-guard.log" 2>&1 &
+for n in mld0 mld1; do [ ! -e "/sys/class/net/$n" ] || ifconfig "$n" down; done
+for f in /sys/class/net/wlan*; do [ -d "$f" ] || continue; ifconfig "${f##*/}" down; done
+for f in /sys/class/net/wlan*; do [ -d "$f" ] || continue; wlanconfig "${f##*/}" destroy; done
+for n in mld0 mld1; do [ ! -e "/sys/class/net/$n" ] || iw dev "$n" del; done
+[ ! -e /sys/class/net/mld-wifi0 ] || ifconfig mld-wifi0 down
+for m in ath_pktlog monitor wifi_3_0; do [ ! -d "/sys/module/$m" ] || rmmod "$m"; done
+sleep 2
+[ ! -e /sys/module/wifi_3_0 ] || die 'stock WLAN module still active'
+"$STAGE/pci-quiesce" --quiesce "$STAGE/pci-before.bin" >"$STAGE/pci-quiesce.log"
+[ "$(grep -c 'bus_master=0 msi_enable=0 verified=1' "$STAGE/pci-quiesce.log")" = 2 ] || die 'PCIe quiesce verification failed'
+sync
+log 'switching from the stock kernel to the USB-root system'
+"$STAGE/kexec" -c -e
+die 'kexec unexpectedly returned; stock recovery guard is active'

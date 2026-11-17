@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "objects_scanned": 314,
+  "findings": [],
+  "private_values_in_report": false,
+  "scope": "public-source-only",
+  "image_scanned": false
+}

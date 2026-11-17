@@ -1,0 +1,430 @@
+--- /dev/null
++++ b/drivers/leds/rgb/leds-sr7420-ledboard.c
+@@ -0,0 +1,259 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* SR7420 RGB effect board. The controller model is not identified. */
++
++#include <linux/device.h>
++#include <linux/err.h>
++#include <linux/i2c.h>
++#include <linux/kernel.h>
++#include <linux/led-class-multicolor.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++
++#include "sr7420-ledboard-protocol.h"
++
++struct sr7420_ledboard {
++	struct i2c_client *client;
++	struct led_classdev_mc mc;
++	struct mc_subled subleds[3];
++	struct mutex lock;
++	unsigned int effect;
++	unsigned int speed;
++	u8 last_frame[SR7420_LEDBOARD_FRAME_SIZE];
++};
++
++static const char * const sr7420_effects[] = {
++	"steady", "breath", "blink", "strobe", "flow",
++	"rainbow-fade", "rainbow-breath", "rainbow-blink", "rainbow-strobe",
++};
++
++/* Caller holds board->lock. Only full, ACKed writes update last_frame. */
++static int sr7420_ledboard_send(struct sr7420_ledboard *board,
++							   enum led_brightness brightness)
++{
++	struct sr7420_ledboard_config config = {
++		.mode = board->effect,
++		.brightness = DIV_ROUND_CLOSEST(brightness * 100U, 255U),
++		.speed = board->speed,
++	};
++	u8 frame[SR7420_LEDBOARD_FRAME_SIZE];
++	int i, ret;
++
++	/* Keep low nonzero LED-class brightness visible after quantization. */
++	if (brightness && !config.brightness)
++		config.brightness = 1;
++
++	for (i = 0; i < ARRAY_SIZE(config.rgb); i++)
++		config.rgb[i] = min(board->subleds[i].intensity, 255U);
++
++	sr7420_ledboard_encode(frame, &config);
++	ret = i2c_master_send(board->client, frame, sizeof(frame));
++	if (ret < 0)
++		return ret;
++	if (ret != sizeof(frame))
++		return -EIO;
++
++	memcpy(board->last_frame, frame, sizeof(frame));
++	return 0;
++}
++
++static int sr7420_ledboard_brightness_set(struct led_classdev *cdev,
++										 enum led_brightness brightness)
++{
++	struct sr7420_ledboard *board;
++	int ret;
++
++	board = container_of(lcdev_to_mccdev(cdev), struct sr7420_ledboard, mc);
++	mutex_lock(&board->lock);
++	ret = sr7420_ledboard_send(board, brightness);
++	mutex_unlock(&board->lock);
++	return ret;
++}
++
++static ssize_t available_effects_show(struct device *dev,
++									 struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "steady breath blink strobe flow rainbow-fade rainbow-breath rainbow-blink rainbow-strobe\n");
++}
++static DEVICE_ATTR_RO(available_effects);
++
++static ssize_t effect_show(struct device *dev, struct device_attribute *attr,
++						   char *buf)
++{
++	struct sr7420_ledboard *board = dev_get_drvdata(dev);
++	ssize_t ret;
++
++	mutex_lock(&board->lock);
++	ret = sysfs_emit(buf, "%s\n", sr7420_effects[board->effect]);
++	mutex_unlock(&board->lock);
++	return ret;
++}
++
++static ssize_t effect_store(struct device *dev, struct device_attribute *attr,
++							const char *buf, size_t count)
++{
++	struct sr7420_ledboard *board = dev_get_drvdata(dev);
++	struct led_classdev *cdev = &board->mc.led_cdev;
++	unsigned int previous;
++	int effect, ret;
++
++	effect = sysfs_match_string(sr7420_effects, buf);
++	if (effect < 0)
++		return effect;
++
++	mutex_lock(&cdev->led_access);
++	mutex_lock(&board->lock);
++	previous = board->effect;
++	board->effect = effect;
++	ret = sr7420_ledboard_send(board, cdev->brightness);
++	if (ret)
++		board->effect = previous;
++	mutex_unlock(&board->lock);
++	mutex_unlock(&cdev->led_access);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_RW(effect);
++
++static ssize_t speed_show(struct device *dev, struct device_attribute *attr,
++						  char *buf)
++{
++	struct sr7420_ledboard *board = dev_get_drvdata(dev);
++	unsigned int speed;
++
++	mutex_lock(&board->lock);
++	speed = board->effect == 3 || board->effect == 8 ? 5 : board->speed;
++	mutex_unlock(&board->lock);
++	return sysfs_emit(buf, "%u\n", speed);
++}
++
++static ssize_t speed_store(struct device *dev, struct device_attribute *attr,
++						   const char *buf, size_t count)
++{
++	struct sr7420_ledboard *board = dev_get_drvdata(dev);
++	struct led_classdev *cdev = &board->mc.led_cdev;
++	unsigned int speed, previous;
++	int ret;
++
++	ret = kstrtouint(buf, 10, &speed);
++	if (ret)
++		return ret;
++	if (speed != 1 && speed != 3 && speed != 5)
++		return -EINVAL;
++
++	mutex_lock(&cdev->led_access);
++	mutex_lock(&board->lock);
++	previous = board->speed;
++	board->speed = speed;
++	ret = sr7420_ledboard_send(board, cdev->brightness);
++	if (ret)
++		board->speed = previous;
++	mutex_unlock(&board->lock);
++	mutex_unlock(&cdev->led_access);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_RW(speed);
++
++static ssize_t last_frame_show(struct device *dev, struct device_attribute *attr,
++							   char *buf)
++{
++	struct sr7420_ledboard *board = dev_get_drvdata(dev);
++	ssize_t ret;
++
++	mutex_lock(&board->lock);
++	ret = sysfs_emit(buf, "%8phN\n", board->last_frame);
++	mutex_unlock(&board->lock);
++	return ret;
++}
++static DEVICE_ATTR_RO(last_frame);
++
++static struct attribute *sr7420_ledboard_attrs[] = {
++	&dev_attr_available_effects.attr,
++	&dev_attr_effect.attr,
++	&dev_attr_speed.attr,
++	&dev_attr_last_frame.attr,
++	NULL,
++};
++static const struct attribute_group sr7420_ledboard_group = {
++	.attrs = sr7420_ledboard_attrs,
++};
++
++static int sr7420_ledboard_probe(struct i2c_client *client)
++{
++	static const unsigned int colors[] = {
++		LED_COLOR_ID_RED, LED_COLOR_ID_GREEN, LED_COLOR_ID_BLUE,
++	};
++	struct led_init_data init_data = {
++		.fwnode = dev_fwnode(&client->dev),
++		.devicename = "sr7420",
++		.default_label = "rgb:status",
++	};
++	struct sr7420_ledboard *board;
++	struct led_classdev *cdev;
++	int i, ret;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
++		return -EOPNOTSUPP;
++
++	board = devm_kzalloc(&client->dev, sizeof(*board), GFP_KERNEL);
++	if (!board)
++		return -ENOMEM;
++
++	board->client = client;
++	board->speed = 5;
++	mutex_init(&board->lock);
++	board->mc.num_colors = ARRAY_SIZE(board->subleds);
++	board->mc.subled_info = board->subleds;
++	for (i = 0; i < ARRAY_SIZE(colors); i++) {
++		board->subleds[i].color_index = colors[i];
++		board->subleds[i].intensity = 255;
++	}
++
++	cdev = &board->mc.led_cdev;
++	cdev->max_brightness = 255;
++	cdev->brightness = LED_OFF;
++	cdev->brightness_set_blocking = sr7420_ledboard_brightness_set;
++	cdev->flags = LED_CORE_SUSPENDRESUME;
++	i2c_set_clientdata(client, board);
++
++	/* There is no verified readback command. Start in a known volatile state. */
++	mutex_lock(&board->lock);
++	ret = sr7420_ledboard_send(board, LED_OFF);
++	mutex_unlock(&board->lock);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "LED board did not ACK\n");
++
++	ret = devm_led_classdev_multicolor_register_ext(&client->dev,
++												   &board->mc, &init_data);
++	if (ret)
++		return ret;
++
++	/* Multicolor registration owns cdev.groups; extend the I2C parent. */
++	return devm_device_add_group(&client->dev, &sr7420_ledboard_group);
++}
++
++static const struct of_device_id sr7420_ledboard_of_match[] = {
++	{ .compatible = "zte,sr7420-ledboard" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, sr7420_ledboard_of_match);
++
++static const struct i2c_device_id sr7420_ledboard_ids[] = {
++	{ "sr7420-ledboard" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, sr7420_ledboard_ids);
++
++static struct i2c_driver sr7420_ledboard_driver = {
++	.driver = {
++		.name = "sr7420-ledboard",
++		.of_match_table = sr7420_ledboard_of_match,
++	},
++	.probe = sr7420_ledboard_probe,
++	.id_table = sr7420_ledboard_ids,
++};
++module_i2c_driver(sr7420_ledboard_driver);
++
++MODULE_DESCRIPTION("SR7420 RGB effect board, volatile commands only");
++MODULE_LICENSE("GPL");
+--- /dev/null
++++ b/drivers/leds/rgb/sr7420-ledboard-protocol.h
+@@ -0,0 +1,44 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _SR7420_LEDBOARD_PROTOCOL_H
++#define _SR7420_LEDBOARD_PROTOCOL_H
++
++#define SR7420_LEDBOARD_FRAME_SIZE 8
++#define SR7420_LEDBOARD_EFFECT_COUNT 9
++
++/* Wire order is independent of the CPU's byte order. */
++struct sr7420_ledboard_config {
++	unsigned char mode;
++	unsigned char rgb[3];
++	unsigned char brightness; /* Controller percentage, 0..100. */
++	unsigned char speed;
++};
++
++static inline void
++sr7420_ledboard_encode(unsigned char frame[SR7420_LEDBOARD_FRAME_SIZE],
++					  const struct sr7420_ledboard_config *config)
++{
++	if (!config->brightness) {
++		/* Exact volatile LedBoardActionOff command used by the stock OS. */
++		frame[0] = 1;
++		frame[1] = 255;
++		frame[2] = 255;
++		frame[3] = 255;
++		frame[4] = 0;
++		frame[5] = 4;
++	} else {
++		frame[0] = config->mode;
++		frame[1] = config->rgb[0];
++		frame[2] = config->rgb[1];
++		frame[3] = config->rgb[2];
++		frame[4] = config->brightness;
++		/* Stock firmware fixes the speed for the two strobe modes. */
++		frame[5] = config->mode == 3 || config->mode == 8 ?
++				   5 : config->speed;
++	}
++
++	/* No persistent-save operation is exposed by this driver. */
++	frame[6] = 0;
++	frame[7] = 0;
++}
++
++#endif
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-bus-i2c-devices-sr7420-ledboard
+@@ -0,0 +1,32 @@
++What:           /sys/bus/i2c/devices/.../effect
++Date:           November 2026
++Description:
++                SR7420 LED-board hardware effect. Read/write one name listed
++                by available_effects. Unknown names return EINVAL. Standard
++                brightness and RGB intensity remain on the multicolor LED
++                class device. Changes take effect immediately and are volatile.
++
++What:           /sys/bus/i2c/devices/.../available_effects
++Date:           November 2026
++Description:
++                Read-only list: steady breath blink strobe flow rainbow-fade
++                rainbow-breath rainbow-blink rainbow-strobe. These map to
++                the board protocol's modes 0 through 8 in that order.
++
++What:           /sys/bus/i2c/devices/.../speed
++Date:           November 2026
++Description:
++                Read/write 1 (fast), 3 (medium), or 5 (slow). Other values
++                return EINVAL. Strobe and rainbow-strobe always transmit 5,
++                matching stock firmware. Reading reports this effective value.
++                The last requested speed is retained for other effects.
++
++What:           /sys/bus/i2c/devices/.../last_frame
++Date:           November 2026
++Description:
++                Read-only 16 hexadecimal digits of the most recent complete
++                I2C write acknowledged by the controller. This is software
++                history, not controller readback or proof of visible output.
++                Frame bytes are mode, R, G, B, percent brightness, speed,
++                save, reserved. Save and reserved are always zero; there is
++                no interface to save a pattern in controller nonvolatile memory.
+--- /dev/null
++++ b/Documentation/leds/leds-sr7420-ledboard.rst
+@@ -0,0 +1,33 @@
++SR7420 LED effect board
++=======================
++
++This downstream driver names the router board rather than an unidentified
++controller IC. On the SR7420, the stock BSP drives a board at I2C address
++0x38 using GPIO7 for SCL and GPIO8 for SDA. The RAM-test device tree uses
++i2c-gpio with open-drain descriptors and a 10 microsecond delay.
++
++The I2C device uses compatible "zte,sr7420-ledboard", reg 0x38, color
++LED_COLOR_ID_RGB and function LED_FUNCTION_STATUS. Its RGB cluster is one
++Linux multicolor LED. Intensity channel order is red, green, blue; both
++multi_intensity and brightness use the LED-class 0..255 range. The hardware
++brightness field is a rounded 0..100 percentage. A nonzero LED brightness
++rounding below one percent is clamped to one percent. RGB intensity is
++clamped to 255 before transmission. No verified readback command exists.
++
++Probe sends the stock volatile OFF frame, 01ffffff00040000, to establish
++a known state and verify acknowledgement. Other writes transmit eight bytes
++in wire order, without a host-endian u64 conversion. No SMBus register
++command or length prefix is inserted. All commands keep the save and
++reserved bytes zero. The driver does not expose arbitrary frame writes.
++
++The I2C parent's effect, available_effects, speed and last_frame attributes
++are reachable through /sys/class/leds/rgb:status/device/. Multicolor class
++attributes and Linux LED triggers remain on the LED class device. The extra
++attributes intentionally live on the parent because multicolor registration
++owns the LED-class attribute groups. Driver mutexes serialize sleeping I2C
++transfers and restore cached effect/speed after a failed write.
++
++This implementation was exercised on a warm kexec Linux 6.18.60 initramfs
++with ten read-only NAND partitions. It does not establish cold-boot pinmux,
++controller power sequencing, or a flash-installation/recovery process. The
++experimental DT include is not imported by the production board DTS yet.
+--- /dev/null
++++ b/arch/arm64/boot/dts/zte/zx279133-sr7420-ledboard.dtsi
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/leds/common.h>
++
++/* Experimental RAM-boot addition; not enabled in the main SR7420 DTS. */
++/ {
++	i2c-ledboard {
++		compatible = "i2c-gpio";
++		sda-gpios = <&gpio0 8 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		scl-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		i2c-gpio,delay-us = <10>;
++		i2c-gpio,timeout-ms = <100>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		led-controller@38 {
++			compatible = "zte,sr7420-ledboard";
++			reg = <0x38>;
++			color = <LED_COLOR_ID_RGB>;
++			function = LED_FUNCTION_STATUS;
++		};
++	};
++};
+--- a/drivers/leds/rgb/Kconfig
++++ b/drivers/leds/rgb/Kconfig
+@@ -75,4 +75,14 @@
+ 	  This driver can also be built as a module. If so, the module
+ 	  will be called "leds-mt6370-rgb".
+ 
++config LEDS_SR7420_LEDBOARD
++	tristate "SR7420 RGB effect board"
++	depends on I2C && OF
++	help
++	  Support the I2C RGB effect board in the ZTE SR7420. Provides
++	  multicolor LED brightness/intensity and volatile hardware effects.
++	  No persistent-save command is exposed.
++
++	  The module will be called leds-sr7420-ledboard.
++
+ endif # LEDS_CLASS_MULTICOLOR
+--- a/drivers/leds/rgb/Makefile
++++ b/drivers/leds/rgb/Makefile
+@@ -6,3 +6,4 @@
+ obj-$(CONFIG_LEDS_PWM_MULTICOLOR)	+= leds-pwm-multicolor.o
+ obj-$(CONFIG_LEDS_QCOM_LPG)		+= leds-qcom-lpg.o
+ obj-$(CONFIG_LEDS_MT6370_RGB)		+= leds-mt6370-rgb.o
++obj-$(CONFIG_LEDS_SR7420_LEDBOARD)	+= leds-sr7420-ledboard.o

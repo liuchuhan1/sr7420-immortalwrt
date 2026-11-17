@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-17",
+  "release": "development",
+  "publishable_image": false,
+  "all_kmods_compiled": false,
+  "usb_lan_verified": false,
+  "single_web_upload_verified": false,
+  "cold_boot_verified": false,
+  "smp_verified": false,
+  "default_username": "root",
+  "default_password": "password",
+  "default_ssid": "immortalwrt",
+  "default_encryption": "none",
+  "source_handover_patch_applies": true,
+  "source_ath12k_patch_applies": true,
+  "private_template_redactions": [
+    {
+      "template": "sr7420_stock32_create0",
+      "redacted_values": 1,
+      "bytes": 88
+    },
+    {
+      "template": "sr7420_stock32_start0",
+      "redacted_values": 1,
+      "bytes": 180
+    },
+    {
+      "template": "sr7420_stock32_peer0",
+      "redacted_values": 1,
+      "bytes": 32
+    },
+    {
+      "template": "sr7420_stock32_start1",
+      "redacted_values": 1,
+      "bytes": 180
+    }
+  ],
+  "blockers": [
+    "Last USB kernel boot did not restore Ethernet",
+    "Vendor config upload only proves maintenance access",
+    "Vendor firmware requires a verified accepted installer format"
+  ],
+  "build_host_available": true,
+  "source_privacy_scan_passed": true
+}

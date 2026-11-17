@@ -1,0 +1,31 @@
+Subject: [PATCH] soc: zte: accept the verified SR7420 boot information ABI
+
+The SR7420 2B4 live DT contains the same 1400-byte versioninfo ABI as
+SR1010. Its selected record and embedded version-header CRC were checked
+against the stock package. Slot offsets remain board-specific.
+
+--- a/Documentation/devicetree/bindings/arm/zte.yaml
++++ b/Documentation/devicetree/bindings/arm/zte.yaml
+@@ -19,7 +19,9 @@
+   compatible:
+     oneOf:
+       - items:
+-          - const: zte,zx279133-sr1010
++          - enum:
++              - zte,zx279133-sr1010
++              - zte,zx279133-sr7420
+           - const: zte,zx279133
+       - items:
+           - enum:
+--- a/drivers/soc/zte/zx279133-bootinfo.c
++++ b/drivers/soc/zte/zx279133-bootinfo.c
+@@ -89,7 +89,8 @@
+ 	const void *data;
+ 	int len;
+ 
+-	if (!of_machine_is_compatible("zte,zx279133-sr1010"))
++	if (!of_machine_is_compatible("zte,zx279133-sr1010") &&
++	    !of_machine_is_compatible("zte,zx279133-sr7420"))
+ 		return -ENODEV;
+ 
+ 	data = of_get_property(of_chosen, "versioninfo", &len);

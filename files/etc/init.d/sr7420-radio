@@ -1,0 +1,7 @@
+#!/bin/sh /etc/rc.common
+# Prepare both radios before network/netifd starts. Parameters retain the tested ABI.
+START=18
+STOP=89
+start() {
+ /usr/sbin/sr7420-radio-start >>/tmp/sr7420-radio.log 2>&1 || logger -t sr7420-radio 'radio setup failed; see /tmp/sr7420-radio.log'
+}

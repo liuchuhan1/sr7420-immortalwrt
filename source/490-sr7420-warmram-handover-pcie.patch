@@ -1,0 +1,510 @@
+SR7420: stock-kexec handover and PCIe host (development only)
+
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -84,6 +84,9 @@
+ 	 */
+ SYM_CODE_START(primary_entry)
+ 	bl	record_mmu_state
++#ifdef CONFIG_SR7420_WARM_HANDOVER
++	bl	sr7420_warm_quiesce
++#endif
+ 	bl	preserve_boot_args
+ 
+ 	adrp	x1, early_init_stack
+@@ -521,3 +524,89 @@
+ 	adrp	x0, KERNEL_START		// __pa(KERNEL_START)
+ 	br	x8
+ SYM_FUNC_END(__primary_switch)
++
++#ifdef CONFIG_SR7420_WARM_HANDOVER
++.pushsection ".idmap.text", "a"
++/* SR7420 RAM diagnostic only, called with MMU off after stock kexec.
++ * No clock/reset changes. Old CPUs are already stopped. x0-x3 untouched.
++ * Stop XMAC ingress, drain for 125 ms, stop egress, mask IDM IRQs;
++ * observe 19 completion words over another 125 ms before starting Linux.
++ * Retained evidence stays in the reserved final 256 bytes of RAM log.
++ */
++SYM_CODE_START_LOCAL(sr7420_warm_quiesce)
++ cbnz x19, 9f
++ mov_q x9, 0xb52fff00
++ mov_q x10, 0x31514d5241575253 // "SRWARMQ1"
++ str x10, [x9]
++ str wzr, [x9, #8]
++ mov_q x10, 0x10e10048
++ ldr w11, [x10]
++ str w11, [x9, #12]
++ /* NPPT PCLK and XMAC working clock must already be live. */
++ tbz w11, #2, 9f
++ tbz w11, #12, 9f
++ mov_q x10, 0x19140000
++ mov_q x11, 0x19180000
++ ldr w12, [x10, #0x10]
++ ldr w13, [x11, #0x10]
++ stp w12, w13, [x9, #16]
++ bic w12, w12, #1
++ bic w13, w13, #1
++ str w12, [x10, #0x10]
++ str w13, [x11, #0x10]
++ dsb sy
++ mrs x12, cntpct_el0
++ mrs x13, cntfrq_el0
++ lsr x13, x13, #3
++ add x12, x12, x13
++1: mrs x14, cntpct_el0
++ cmp x14, x12
++ b.lo 1b
++ ldr w12, [x10]
++ ldr w13, [x11]
++ stp w12, w13, [x9, #24]
++ bic w12, w12, #1
++ bic w13, w13, #1
++ str w12, [x10]
++ str w13, [x11]
++ mov_q x10, 0x19280040
++ ldr w12, [x10]
++ str w12, [x9, #32]
++ mov w12, #0xffff
++ movk w12, #0x7ff, lsl #16
++ str w12, [x10]
++ dsb sy
++ /* Contiguous IDM +0xa8..0xf0: TX done and RX counters, 19 words. */
++ mov_q x10, 0x192800a8
++ add x11, x9, #48
++ mov w12, #19
++2: ldr w13, [x10], #4
++ str w13, [x11], #4
++ subs w12, w12, #1
++ b.ne 2b
++ mrs x12, cntpct_el0
++ mrs x13, cntfrq_el0
++ lsr x13, x13, #3
++ add x12, x12, x13
++3: mrs x14, cntpct_el0
++ cmp x14, x12
++ b.lo 3b
++ mov_q x10, 0x192800a8
++ add x11, x9, #48
++ add x12, x9, #128
++ mov w13, #19
++ mov w16, #1
++4: ldr w14, [x10], #4
++ ldr w15, [x11], #4
++ str w14, [x12], #4
++ cmp w14, w15
++ csel w16, w16, wzr, eq
++ subs w13, w13, #1
++ b.ne 4b
++ str w16, [x9, #8]
++ dsb sy
++9: ret
++SYM_CODE_END(sr7420_warm_quiesce)
++
++.popsection
++#endif
+--- a/drivers/tty/serial/earlycon.c
++++ b/drivers/tty/serial/earlycon.c
+@@ -351,3 +351,56 @@
+ }
+ 
+ #endif /* CONFIG_OF_EARLY_FLATTREE */
++
++#ifdef CONFIG_SR7420_WARM_HANDOVER
++/* Diagnostic-only RAM early console. Exactly one validated DRAM page. */
++#define SR7420_RAMLOG_BASE 0xb52f0000UL
++#define SR7420_RAMLOG_HEADER 64U
++#define SR7420_RAMLOG_CAPACITY (4096U - SR7420_RAMLOG_HEADER)
++static void sr7420_ramlog_write(struct console *con, const char *s,
++                               unsigned int count)
++{
++        struct earlycon_device *dev = con->data;
++        void __iomem *base = dev->port.membase;
++        u32 pos = readl(base + 16);
++        u32 total = readl(base + 20);
++        unsigned int i;
++
++        if (pos >= SR7420_RAMLOG_CAPACITY)
++                return;
++        for (i = 0; i < count; i++) {
++                writeb(s[i], base + SR7420_RAMLOG_HEADER + pos);
++                if (++pos == SR7420_RAMLOG_CAPACITY)
++                        pos = 0;
++        }
++        wmb();
++        writel(pos, base + 16);
++        writel(total + count, base + 20);
++        wmb();
++}
++
++static int __init sr7420_ramlog_setup(struct earlycon_device *dev,
++                                     const char *options)
++{
++        static const char signature[16] = "SR7420-RAMLOG-V1";
++        static const char attempt[] = "wifi-20261116-05";
++        void __iomem *base = dev->port.membase;
++        unsigned int i;
++
++        if (dev->port.mapbase != SR7420_RAMLOG_BASE || !base)
++                return -EINVAL;
++        for (i = 0; i < 4096; i++)
++                writeb(0, base + i);
++        for (i = 0; i < sizeof(signature); i++)
++                writeb(signature[i], base + i);
++        writel(SR7420_RAMLOG_HEADER, base + 24);
++        writel(SR7420_RAMLOG_CAPACITY, base + 28);
++        for (i = 0; i < sizeof(attempt); i++)
++                writeb(attempt[i], base + 32 + i);
++        wmb();
++        dev->con->write = sr7420_ramlog_write;
++        return 0;
++}
++EARLYCON_DECLARE(sr7420ram, sr7420_ramlog_setup);
++
++#endif
+--- a/arch/arm64/Kconfig.platforms
++++ b/arch/arm64/Kconfig.platforms
+@@ -454,3 +454,11 @@
+ 	  This enables support for Xilinx ZynqMP Family
+ 
+ endmenu # "Platform selection"
++
++config SR7420_WARM_HANDOVER
++	bool "SR7420 stock-kexec warm handover (development only)"
++	depends on ARM64
++	default n
++	help
++	  Preserve validated stock-to-RAM handover and retained early log.
++	  This is not board cold initialization.
+--- a/drivers/pci/controller/Kconfig
++++ b/drivers/pci/controller/Kconfig
+@@ -363,3 +363,9 @@
+ source "drivers/pci/controller/mobiveil/Kconfig"
+ source "drivers/pci/controller/plda/Kconfig"
+ endmenu
++
++config PCIE_ZX279133_WARM
++	tristate "ZX279133 warm PCIe host (SR7420 development)"
++	depends on ARM64 && PCI && OF
++	select IRQ_DOMAIN
++	default n
+--- a/drivers/pci/controller/Makefile
++++ b/drivers/pci/controller/Makefile
+@@ -63,3 +63,5 @@
+ obj-$(CONFIG_ARM64) += pci-xgene.o
+ endif
+ endif
++
++obj-$(CONFIG_PCIE_ZX279133_WARM) += pci-zx279133-warm.o
+--- /dev/null
++++ b/drivers/pci/controller/pci-zx279133-warm.c
+@@ -0,0 +1,310 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* SR7420 RAM bring-up only: preserve an OEM-initialized ZX279133 PCIe link.
++ * No clock/PHY/reset or cold-start implementation is claimed here.
++ * Register layout is cross-checked against the extracted stock 5.4 kernel.
++ */
++#include <linux/bitmap.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/irq.h>
++#include <linux/irqdomain.h>
++#include <linux/irqchip/irq-msi-lib.h>
++#include <linux/module.h>
++#include <linux/msi.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/of_pci.h>
++#include <linux/pci.h>
++#include <linux/platform_device.h>
++#include <linux/sizes.h>
++
++#define ZX_LINK_STATUS 0x1100
++#define ZX_ATU1 0x300200
++#define ZX_MSI_ADDR_LO 0x820
++#define ZX_MSI_ADDR_HI 0x824
++#define ZX_MSI_ENABLE  0x828
++#define ZX_MSI_MASK    0x82c
++#define ZX_MSI_STATUS  0x830
++#define ZX_VECTORS 32
++
++struct zx_warm_pcie {
++ struct device *dev;
++ void __iomem *csr, *dbi, *cfg;
++ phys_addr_t cfg_phys, msi_addr;
++ struct pci_host_bridge *bridge;
++ struct irq_domain *domain;
++ raw_spinlock_t config_lock, msi_lock;
++ DECLARE_BITMAP(used, ZX_VECTORS);
++ u32 spi_base;
++};
++
++static void zx_msi_compose(struct irq_data *d, struct msi_msg *msg)
++{
++ struct zx_warm_pcie *p = irq_data_get_irq_chip_data(d);
++ msg->address_lo = lower_32_bits(p->msi_addr);
++ msg->address_hi = upper_32_bits(p->msi_addr);
++ msg->data = d->hwirq;
++}
++
++static void zx_msi_mask(struct irq_data *d)
++{
++ struct zx_warm_pcie *p = irq_data_get_irq_chip_data(d);
++ unsigned long flags;
++ raw_spin_lock_irqsave(&p->msi_lock, flags);
++ writel(readl(p->dbi + ZX_MSI_MASK) | BIT(d->hwirq), p->dbi + ZX_MSI_MASK);
++ raw_spin_unlock_irqrestore(&p->msi_lock, flags);
++ irq_chip_mask_parent(d);
++}
++
++static void zx_msi_unmask(struct irq_data *d)
++{
++ struct zx_warm_pcie *p = irq_data_get_irq_chip_data(d);
++ unsigned long flags;
++ raw_spin_lock_irqsave(&p->msi_lock, flags);
++ writel(readl(p->dbi + ZX_MSI_MASK) & ~BIT(d->hwirq), p->dbi + ZX_MSI_MASK);
++ raw_spin_unlock_irqrestore(&p->msi_lock, flags);
++ irq_chip_unmask_parent(d);
++}
++
++static void zx_msi_eoi(struct irq_data *d)
++{
++ struct zx_warm_pcie *p = irq_data_get_irq_chip_data(d);
++ /* Stock zx_msi_isr uses W1C at DBI+0x830, then EOI at the GIC. */
++ writel(BIT(d->hwirq), p->dbi + ZX_MSI_STATUS);
++ readl(p->dbi + ZX_MSI_STATUS);
++ irq_chip_eoi_parent(d);
++}
++
++static struct irq_chip zx_msi_chip = {
++ .name = "ZX279133-MSI",
++ .irq_mask = zx_msi_mask,
++ .irq_unmask = zx_msi_unmask,
++ .irq_eoi = zx_msi_eoi,
++ .irq_set_affinity = irq_chip_set_affinity_parent,
++ .irq_compose_msi_msg = zx_msi_compose,
++};
++
++static int zx_msi_alloc(struct irq_domain *domain, unsigned int virq,
++                        unsigned int count, void *arg)
++{
++ struct zx_warm_pcie *p = domain->host_data;
++ struct irq_fwspec spec = { .fwnode = domain->parent->fwnode, .param_count = 3 };
++ unsigned long flags;
++ int first, ret;
++ unsigned int i;
++ raw_spin_lock_irqsave(&p->msi_lock, flags);
++ first = bitmap_find_free_region(p->used, ZX_VECTORS, order_base_2(count));
++ raw_spin_unlock_irqrestore(&p->msi_lock, flags);
++ if (first < 0)
++  return first;
++ for (i = 0; i < count; i++) {
++  spec.param[0] = 0;
++  spec.param[1] = p->spi_base + first + i;
++  spec.param[2] = IRQ_TYPE_LEVEL_HIGH;
++  ret = irq_domain_alloc_irqs_parent(domain, virq + i, 1, &spec);
++  if (ret)
++   goto unwind;
++  irq_domain_set_hwirq_and_chip(domain, virq + i, first + i, &zx_msi_chip, p);
++ }
++ dev_info(p->dev, "MSI allocated vectors=%u first=%d SPI=%u message=%pa\n",
++          count, first, p->spi_base + first, &p->msi_addr);
++ return 0;
++unwind:
++ if (i)
++  irq_domain_free_irqs_parent(domain, virq, i);
++ raw_spin_lock_irqsave(&p->msi_lock, flags);
++ bitmap_release_region(p->used, first, order_base_2(count));
++ raw_spin_unlock_irqrestore(&p->msi_lock, flags);
++ return ret;
++}
++
++static void zx_msi_free(struct irq_domain *domain, unsigned int virq, unsigned int count)
++{
++ struct zx_warm_pcie *p = domain->host_data;
++ struct irq_data *d = irq_domain_get_irq_data(domain, virq);
++ unsigned long flags;
++ unsigned int first = d->hwirq;
++ irq_domain_free_irqs_parent(domain, virq, count);
++ raw_spin_lock_irqsave(&p->msi_lock, flags);
++ bitmap_release_region(p->used, first, order_base_2(count));
++ raw_spin_unlock_irqrestore(&p->msi_lock, flags);
++}
++
++static const struct irq_domain_ops zx_msi_ops = {
++ .select = msi_lib_irq_domain_select,
++ .alloc = zx_msi_alloc,
++ .free = zx_msi_free,
++};
++
++static bool zx_msi_init_info(struct device *dev, struct irq_domain *domain,
++                            struct irq_domain *parent, struct msi_domain_info *info)
++{
++ if (!msi_lib_init_dev_msi_info(dev, domain, parent, info))
++  return false;
++ info->handler = handle_fasteoi_irq;
++ return true;
++}
++
++static const struct msi_parent_ops zx_msi_parent_ops = {
++ .supported_flags = MSI_GENERIC_FLAGS_MASK | MSI_FLAG_MULTI_PCI_MSI,
++ .required_flags = MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
++                   MSI_FLAG_PCI_MSI_MASK_PARENT,
++ .chip_flags = MSI_CHIP_FLAG_SET_EOI,
++ .bus_select_token = DOMAIN_BUS_NEXUS,
++ .bus_select_mask = MATCH_PCI_MSI,
++ .prefix = "ZX279133-",
++ .init_dev_msi_info = zx_msi_init_info,
++};
++
++static int zx_cfg_atu(struct zx_warm_pcie *p, unsigned int bus, unsigned int devfn)
++{
++ void __iomem *a = p->dbi + ZX_ATU1;
++ u32 val;
++ writel(0, a + 4);
++ if (readl_poll_timeout_atomic(a + 4, val, !(val & BIT(31)), 1, 1000))
++  return -ETIMEDOUT;
++ writel(lower_32_bits(p->cfg_phys), a + 8);
++ writel(upper_32_bits(p->cfg_phys), a + 0xc);
++ writel(lower_32_bits(p->cfg_phys + SZ_4K - 1), a + 0x10);
++ writel((bus << 24) | (devfn << 16), a + 0x14);
++ writel(0, a + 0x18);
++ writel(4, a);
++ writel(BIT(31), a + 4);
++ return readl_poll_timeout_atomic(a + 4, val, val & BIT(31), 1, 1000);
++}
++
++static bool zx_cfg_valid(struct zx_warm_pcie *p, struct pci_bus *bus,
++                         unsigned int devfn, int where, int size)
++{
++ if (where < 0 || where + size > SZ_4K || (size != 1 && size != 2 && size != 4) ||
++     (where & (size - 1)) || devfn || bus->number > 1)
++  return false;
++ return !bus->number || (readl(p->csr + ZX_LINK_STATUS) & 1);
++}
++
++static int zx_cfg_read(struct pci_bus *bus, unsigned int devfn,
++                       int where, int size, u32 *val)
++{
++ struct zx_warm_pcie *p = bus->sysdata;
++ void __iomem *addr;
++ unsigned long flags;
++ int ret = PCIBIOS_SUCCESSFUL;
++ *val = ~0U;
++ if (!zx_cfg_valid(p, bus, devfn, where, size))
++  return PCIBIOS_DEVICE_NOT_FOUND;
++ raw_spin_lock_irqsave(&p->config_lock, flags);
++ if (bus->number && zx_cfg_atu(p, bus->number, devfn)) {
++  ret = PCIBIOS_DEVICE_NOT_FOUND;
++  goto out;
++ }
++ addr = (bus->number ? p->cfg : p->dbi) + where;
++ *val = size == 1 ? readb(addr) : size == 2 ? readw(addr) : readl(addr);
++out:
++ raw_spin_unlock_irqrestore(&p->config_lock, flags);
++ return ret;
++}
++
++static int zx_cfg_write(struct pci_bus *bus, unsigned int devfn,
++                        int where, int size, u32 val)
++{
++ struct zx_warm_pcie *p = bus->sysdata;
++ void __iomem *addr;
++ unsigned long flags;
++ int ret = PCIBIOS_SUCCESSFUL;
++ if (!zx_cfg_valid(p, bus, devfn, where, size))
++  return PCIBIOS_DEVICE_NOT_FOUND;
++ raw_spin_lock_irqsave(&p->config_lock, flags);
++ if (bus->number && zx_cfg_atu(p, bus->number, devfn)) {
++  ret = PCIBIOS_DEVICE_NOT_FOUND;
++  goto out;
++ }
++ addr = (bus->number ? p->cfg : p->dbi) + where;
++ if (size == 1) writeb(val, addr);
++ else if (size == 2) writew(val, addr);
++ else writel(val, addr);
++out:
++ raw_spin_unlock_irqrestore(&p->config_lock, flags);
++ return ret;
++}
++
++static struct pci_ops zx_pci_ops = { .read = zx_cfg_read, .write = zx_cfg_write };
++
++static int zx_warm_probe(struct platform_device *pdev)
++{
++ struct device *dev = &pdev->dev;
++ struct pci_host_bridge *bridge;
++ struct zx_warm_pcie *p;
++ struct device_node *parent;
++ struct resource *res;
++ struct irq_domain_info info = { .ops = &zx_msi_ops, .size = ZX_VECTORS };
++ u32 msg[2];
++ int ret;
++ bridge = devm_pci_alloc_host_bridge(dev, sizeof(*p));
++ if (!bridge) return -ENOMEM;
++ p = pci_host_bridge_priv(bridge); p->dev = dev; p->bridge = bridge;
++ raw_spin_lock_init(&p->config_lock); raw_spin_lock_init(&p->msi_lock);
++ p->csr = devm_platform_ioremap_resource_byname(pdev, "csr");
++ if (IS_ERR(p->csr)) return PTR_ERR(p->csr);
++ p->dbi = devm_platform_ioremap_resource_byname(pdev, "dbi");
++ if (IS_ERR(p->dbi)) return PTR_ERR(p->dbi);
++ res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "config");
++ if (!res || resource_size(res) < SZ_4K) return -EINVAL;
++ p->cfg_phys = res->start;
++ p->cfg = devm_pci_remap_cfg_resource(dev, res);
++ if (IS_ERR(p->cfg)) return PTR_ERR(p->cfg);
++ if (!(readl(p->csr + ZX_LINK_STATUS) & 1))
++  return dev_err_probe(dev, -ENOLINK, "warm-only probe: OEM PCIe link is down\n");
++ if (readl(p->dbi) != 0x22051cf2)
++  return dev_err_probe(dev, -ENODEV, "unexpected root complex identity\n");
++ ret = of_property_read_u32(dev->of_node, "zte,msi-spi-base", &p->spi_base);
++ if (ret) return ret;
++ ret = of_property_read_u32_array(dev->of_node, "zte,msi-message-address", msg, 2);
++ if (ret) return ret;
++ p->msi_addr = ((u64)msg[0] << 32) | msg[1];
++ if ((p->spi_base != 67 || p->msi_addr != 0x10e00000) &&
++     (p->spi_base != 118 || p->msi_addr != 0x10e00004)) return -EINVAL;
++ parent = of_irq_find_parent(dev->of_node);
++ if (!parent) return -ENODEV;
++ info.parent = irq_find_host(parent); of_node_put(parent);
++ if (!info.parent) return -EPROBE_DEFER;
++ info.host_data = p; info.fwnode = dev_fwnode(dev);
++ p->domain = msi_create_parent_irq_domain(&info, &zx_msi_parent_ops);
++ if (!p->domain) return -ENOMEM;
++ /* Both endpoint DMA engines must be quiesced before entering this kernel. */
++ writel(lower_32_bits(p->msi_addr), p->dbi + ZX_MSI_ADDR_LO);
++ writel(upper_32_bits(p->msi_addr), p->dbi + ZX_MSI_ADDR_HI);
++ writel(~0U, p->dbi + ZX_MSI_MASK);
++ writel(~0U, p->dbi + ZX_MSI_STATUS);
++ writel(~0U, p->dbi + ZX_MSI_ENABLE);
++ bridge->sysdata = p; bridge->ops = &zx_pci_ops;
++ bridge->msi_domain = true;
++ platform_set_drvdata(pdev, p);
++ dev_info(dev, "warm-only link up, MSI SPI%u..%u addr=%pa cfg=%pa\n",
++          p->spi_base, p->spi_base + ZX_VECTORS - 1, &p->msi_addr, &p->cfg_phys);
++ ret = pci_host_probe(bridge);
++ if (ret) { irq_domain_remove(p->domain); return ret; }
++ return 0;
++}
++
++static void zx_warm_remove(struct platform_device *pdev)
++{
++ struct zx_warm_pcie *p = platform_get_drvdata(pdev);
++ pci_lock_rescan_remove();
++ pci_stop_root_bus(p->bridge->bus); pci_remove_root_bus(p->bridge->bus);
++ pci_unlock_rescan_remove();
++ writel(~0U, p->dbi + ZX_MSI_MASK);
++ writel(0, p->dbi + ZX_MSI_ENABLE);
++ irq_domain_remove(p->domain);
++}
++static const struct of_device_id zx_warm_match[] = {
++ { .compatible = "zte,zx279133-pcie-warm-ramdiag" }, { }
++};
++MODULE_DEVICE_TABLE(of, zx_warm_match);
++static struct platform_driver zx_warm_driver = {
++ .probe = zx_warm_probe, .remove = zx_warm_remove,
++ .driver = { .name = "zx279133-pcie-warm", .of_match_table = zx_warm_match },
++};
++module_platform_driver(zx_warm_driver);
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("SR7420 RAM-only warm PCIe host and MSI bring-up");

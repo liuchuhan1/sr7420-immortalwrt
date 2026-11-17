@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/cnjn/immortalwrt",
+  "commit": "31e2ac4ded9c8896c7aefd3dcb9a46ef77440fbd",
+  "generic_commit": "a4ba8240d8a1aaef7e8c6f2d65e841a9bfd2b8c5",
+  "kernel": "6.18.60",
+  "backports": "6.18.26"
+}

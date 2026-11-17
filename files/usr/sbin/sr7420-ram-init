@@ -1,0 +1,24 @@
+#!/bin/sh
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export INITRAMFS=1
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /boot-state
+log() { echo "<3>SR7420_USB44: $*" >/dev/kmsg; printf '%s %s\n' "$(cut -d' ' -f1 /proc/uptime)" "$*" >>/boot-state/stages.log; }
+log 'ENTER_ROOT'
+# Capture startup messages on the USB root before procd takes over.
+/bin/busybox dmesg -w >>/boot-state/kernel.log 2>&1 &
+/usr/sbin/sr7420-boot-guard >>/boot-state/guard.log 2>&1 &
+reject=0
+for f in /sys/class/mtd/mtd[0-9]*/flags; do
+ [ -f "$f" ] || continue
+ flags=$(cat "$f"); [ $((flags & 1024)) -eq 0 ] || reject=1
+done
+/usr/sbin/quiesce-check >/dev/kmsg 2>&1 || reject=1
+if [ "$reject" != 0 ]; then
+ log FLASH_OR_PCIE_GUARD_REJECTED; sync; reboot -f
+ while :; do sleep 1; done
+fi
+log EXEC_STANDARD_INIT
+exec /sbin/init

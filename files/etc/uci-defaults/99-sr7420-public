@@ -1,0 +1,8 @@
+#!/bin/sh
+# Password and open SSIDs are intentional public-release defaults.
+uci -q delete system.@system[0].description
+uci -q delete system.@system[0].notes
+uci -q delete network.globals.dhcp_default_duid
+uci commit system
+uci commit network
+exit 0

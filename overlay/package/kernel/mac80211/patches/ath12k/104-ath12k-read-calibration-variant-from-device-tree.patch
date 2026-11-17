@@ -1,0 +1,57 @@
+ath12k: allow independent device-tree BDF variants for PCI radios
+
+Read the per-endpoint variant after optional SMBIOS/ACPI lookup. Reject
+empty, overlong, or non-printable values instead of truncating them.
+This does not provide the PCIe host driver, firmware or RF calibration.
+
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -18,6 +18,37 @@
+ #define HOST_CSTATE_BIT			0x04
+ #define PLATFORM_CAP_PCIE_GLOBAL_RESET	0x08
+ #define ATH12K_QMI_MAX_CHUNK_SIZE	2097152
++
++/* Keep independent radios with identical PCI/QMI IDs on their own BDF. */
++static int ath12k_qmi_read_bdf_variant_of(struct ath12k_base *ab)
++{
++	const char *variant;
++	size_t i, len;
++	int ret;
++
++	if (!of_find_property(ab->dev->of_node,
++			      "qcom,ath12k-calibration-variant", NULL))
++		return 0;
++
++	ret = of_property_read_string(ab->dev->of_node,
++				      "qcom,ath12k-calibration-variant",
++				      &variant);
++	if (ret)
++		return ret;
++
++	len = strnlen(variant, sizeof(ab->qmi.target.bdf_ext));
++	if (!len || len >= sizeof(ab->qmi.target.bdf_ext))
++		return -EINVAL;
++
++	for (i = 0; i < len; i++)
++		if (variant[i] < 0x21 || variant[i] > 0x7e)
++			return -EINVAL;
++
++	strscpy(ab->qmi.target.bdf_ext, variant,
++		sizeof(ab->qmi.target.bdf_ext));
++
++	return 0;
++}
+ 
+ static const struct qmi_elem_info wlfw_host_mlo_chip_info_s_v01_ei[] = {
+ 	{
+@@ -2912,6 +2943,10 @@
+ 	if (r)
+ 		ath12k_dbg(ab, ATH12K_DBG_BOOT, "ACPI bdf variant name not set.\n");
+ 
++	ret = ath12k_qmi_read_bdf_variant_of(ab);
++	if (ret)
++		ath12k_err(ab, "invalid device-tree BDF variant: %d\n", ret);
++
+ out:
+ 	return ret;
+ }

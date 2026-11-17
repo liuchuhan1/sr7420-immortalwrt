@@ -1,0 +1,37 @@
+Subject: [PATCH] fw4: resolve lower ingress devices for software offload
+
+DSA LAN PPPoE forwarding on SR7420 remained on the slow path with a bridge
+master in the software flowtable. Lower-port hooks produced OFFLOAD state
+and correct 32 MiB payloads. Reuse the existing lower-device resolver for
+software fallback, retaining software-only devices and existence checks.
+
+--- a/root/usr/share/ucode/fw4.uc
++++ b/root/usr/share/ucode/fw4.uc
+@@ -575,11 +575,24 @@
+ 
+ 		if (!devices) {
+ 			devices = [];
+-
++			let devstatus = {};
++			let bus = ubus.connect();
++
++			if (bus) {
++				devstatus = bus.call("network.device", "status") || {};
++				bus.disconnect();
++			}
++
++			/* Software ingress hooks also need bridge/VLAN/macvlan lower
++			 * devices. The bridge master does not receive a DSA port's
++			 * ingress hook, even when the flow can be routed in software.
++			 * Keep software-only ports: no hardware capability filtering.
++			 */
+ 			for (let zone in this.zones())
+ 				for (let device in zone.related_physdevs)
+-					if (fs.access(`/sys/class/net/${device}`))
+-						push(devices, device);
++					for (let lower in resolve_lower_devices(devstatus, device))
++						if (fs.access(`/sys/class/net/${lower}`))
++							push(devices, lower);
+ 
+ 			devices = sort(uniq(devices));
+ 		}

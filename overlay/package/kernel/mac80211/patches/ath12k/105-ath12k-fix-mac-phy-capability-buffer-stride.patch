@@ -1,0 +1,27 @@
+From upstream commit 4c6eb712a91fa079be6f9f1419c96e0ad2227081
+Subject: wifi: ath12k: fix stride mismatch in mac_phy_caps_parse()
+
+Use kcalloc(count, sizeof(*ptr), flags) for compatibility with the existing
+backports baseline; this preserves the upstream allocation stride fix.
+
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -4555,14 +4555,15 @@
+ 	if (svc_rdy_ext->n_mac_phy_caps >= svc_rdy_ext->tot_phy_id)
+ 		return -ENOBUFS;
+ 
+-	len = min_t(u16, len, sizeof(struct ath12k_wmi_mac_phy_caps_params));
+ 	if (!svc_rdy_ext->n_mac_phy_caps) {
+-		svc_rdy_ext->mac_phy_caps = kzalloc((svc_rdy_ext->tot_phy_id) * len,
+-						    GFP_ATOMIC);
++		svc_rdy_ext->mac_phy_caps =
++			kcalloc(svc_rdy_ext->tot_phy_id,
++				sizeof(*svc_rdy_ext->mac_phy_caps), GFP_ATOMIC);
+ 		if (!svc_rdy_ext->mac_phy_caps)
+ 			return -ENOMEM;
+ 	}
+ 
++	len = min_t(u16, len, sizeof(struct ath12k_wmi_mac_phy_caps_params));
+ 	memcpy(svc_rdy_ext->mac_phy_caps + svc_rdy_ext->n_mac_phy_caps, ptr, len);
+ 	svc_rdy_ext->n_mac_phy_caps++;
+ 	return 0;

@@ -1,0 +1,14 @@
+--- a/drivers/net/ethernet/zte/zx279133-offload.c
++++ b/drivers/net/ethernet/zte/zx279133-offload.c
+@@ -1604,9 +1604,9 @@
+ 		__clear_bit(entry->ikey, offload->ikey_used);
+ 	zx279133_flow_slot_release(offload, entry);
+ out_free:
+-	if (entry->vlan_out && zte_nppt_vlan_put(offload->np, entry->vlan_out))
++	if (entry && entry->vlan_out && zte_nppt_vlan_put(offload->np, entry->vlan_out))
+ 		zte_nppt_vlan_abandon(offload->np, entry->vlan_out);
+-	if (entry->vlan_in && zte_nppt_vlan_put(offload->np, entry->vlan_in))
++	if (entry && entry->vlan_in && zte_nppt_vlan_put(offload->np, entry->vlan_in))
+ 		zte_nppt_vlan_abandon(offload->np, entry->vlan_in);
+ 	mutex_unlock(&offload->lock);
+ 	kfree(entry);

@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SR7420 porting work <local@sr7420.invalid>
+Date: Mon, 16 Nov 2026 00:00:00 +0800
+Subject: [PATCH] backports: use native SOCKWQ flags on Linux 6.18
+
+Linux 6.18 exposes SOCKWQ_ASYNC_NOSPACE and SOCKWQ_ASYNC_WAITDATA as
+enum values in linux/net.h.  The backport header used a preprocessor
+ifndef test, which cannot detect enum constants and therefore defined
+aliases to the removed SOCK_ASYNC_* names.  Keep the native names and
+avoid redefining them.
+
+---
+ backport-include/linux/net.h | 8 --------
+ 1 file changed, 8 deletions(-)
+
+--- a/backport-include/linux/net.h
++++ b/backport-include/linux/net.h
+@@ -4,12 +4,4 @@
+ #include_next <linux/net.h>
+ #include <linux/static_key.h>
+ 
+-
+-#ifndef SOCKWQ_ASYNC_NOSPACE
+-#define SOCKWQ_ASYNC_NOSPACE   SOCK_ASYNC_NOSPACE
+-#endif
+-#ifndef SOCKWQ_ASYNC_WAITDATA
+-#define SOCKWQ_ASYNC_WAITDATA   SOCK_ASYNC_WAITDATA
+-#endif
+-
+ #endif /* __BACKPORT_LINUX_NET_H */

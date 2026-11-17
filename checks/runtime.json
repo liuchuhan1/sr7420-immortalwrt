@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "scope": "synthetic-data-and-shell-syntax",
+  "hardware_tested": false,
+  "checks": [
+    "sha256-boundaries",
+    "firmware-tlv",
+    "board-2-tlv",
+    "full-calibration-mapping",
+    "dtb-mac-patch",
+    "invalid-dtb-rejection",
+    "shell-syntax"
+  ]
+}

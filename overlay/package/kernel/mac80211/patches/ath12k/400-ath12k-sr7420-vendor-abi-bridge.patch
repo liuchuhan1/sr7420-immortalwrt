@@ -1,0 +1,1914 @@
+ath12k: SR7420 vendor ABI bridge with device identities removed
+
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -50,6 +50,14 @@
+ 	return 0;
+ }
+ 
++/* SR7420 diagnostic only; default keeps the existing protocol unchanged. */
++/* RAM-only A/B: mirror the reserved-memory path's unsupported CALDB response. */
++static bool sr7420_no_caldb;
++module_param_named(sr7420_no_caldb, sr7420_no_caldb, bool, 0600);
++
++static bool sr7420_ini_download;
++module_param_named(sr7420_ini_download, sr7420_ini_download, bool, 0444);
++
+ static const struct qmi_elem_info wlfw_host_mlo_chip_info_s_v01_ei[] = {
+ 	{
+ 		.data_type      = QMI_UNSIGNED_1_BYTE,
+@@ -536,6 +544,22 @@
+ 		.tlv_type	= 0x27,
+ 		.offset		= offsetof(struct qmi_wlanfw_host_cap_req_msg_v01,
+ 					   feature_list),
++	},
++	{
++		.data_type = QMI_OPT_FLAG,
++		.elem_len = 1,
++		.elem_size = sizeof(u8),
++		.array_type = NO_ARRAY,
++		.tlv_type = 0x2e,
++		.offset = offsetof(struct qmi_wlanfw_host_cap_req_msg_v01, ini_cfg_support_valid),
++	},
++	{
++		.data_type = QMI_UNSIGNED_1_BYTE,
++		.elem_len = 1,
++		.elem_size = sizeof(u8),
++		.array_type = NO_ARRAY,
++		.tlv_type = 0x2e,
++		.offset = offsetof(struct qmi_wlanfw_host_cap_req_msg_v01, ini_cfg_support),
+ 	},
+ 	{
+ 		.data_type	= QMI_EOTI,
+@@ -2206,6 +2230,11 @@
+ 		req.m3_support = 1;
+ 		req.m3_cache_support_valid = 1;
+ 		req.m3_cache_support = 1;
++	}
++
++	if (sr7420_ini_download) {
++		req.ini_cfg_support_valid = 1;
++		req.ini_cfg_support = 1;
+ 	}
+ 
+ 	req.cal_done_valid = 1;
+@@ -2640,6 +2669,13 @@
+ 		case M3_DUMP_REGION_TYPE:
+ 		case PAGEABLE_MEM_REGION_TYPE:
+ 		case CALDB_MEM_REGION_TYPE:
++			if (chunk->type == CALDB_MEM_REGION_TYPE && sr7420_no_caldb) {
++				ath12k_info(ab, "SR7420_CALDB requested=%u reply_paddr=0 preserve_size=1\n",
++					    chunk->size);
++				chunk->paddr = 0;
++				chunk->v.addr = NULL;
++				break;
++			}
+ 			ret = ath12k_qmi_alloc_chunk(ab, chunk);
+ 			if (ret)
+ 				goto err;
+@@ -2680,6 +2716,7 @@
+ 			ath12k_warn(ab, "memory type %u not supported\n",
+ 				    chunk->type);
+ 			chunk->paddr = 0;
++			chunk->size = 0;
+ 			chunk->v.addr = NULL;
+ 			break;
+ 		}
+@@ -3806,6 +3843,125 @@
+ 	.del_server = ath12k_qmi_ops_del_server,
+ };
+ 
++/* Wire format recovered from this device's factory CNSS module. */
++struct sr7420_ini_req {
++ u8 file_type_valid;
++ u32 file_type;
++ u8 total_size_valid;
++ u32 total_size;
++ u8 seg_id_valid;
++ u32 seg_id;
++ u8 data_valid;
++ u32 data_len;
++ u8 data[6144];
++ u8 end_valid;
++ u8 end;
++};
++
++static const struct qmi_elem_info sr7420_ini_req_ei[] = {
++ { .data_type = QMI_OPT_FLAG, .elem_len = 1, .elem_size = sizeof(u8),
++   .array_type = NO_ARRAY, .tlv_type = 0x10,
++   .offset = offsetof(struct sr7420_ini_req, file_type_valid) },
++ { .data_type = QMI_SIGNED_4_BYTE_ENUM, .elem_len = 1, .elem_size = sizeof(u32),
++   .array_type = NO_ARRAY, .tlv_type = 0x10,
++   .offset = offsetof(struct sr7420_ini_req, file_type) },
++ { .data_type = QMI_OPT_FLAG, .elem_len = 1, .elem_size = sizeof(u8),
++   .array_type = NO_ARRAY, .tlv_type = 0x11,
++   .offset = offsetof(struct sr7420_ini_req, total_size_valid) },
++ { .data_type = QMI_UNSIGNED_4_BYTE, .elem_len = 1, .elem_size = sizeof(u32),
++   .array_type = NO_ARRAY, .tlv_type = 0x11,
++   .offset = offsetof(struct sr7420_ini_req, total_size) },
++ { .data_type = QMI_OPT_FLAG, .elem_len = 1, .elem_size = sizeof(u8),
++   .array_type = NO_ARRAY, .tlv_type = 0x12,
++   .offset = offsetof(struct sr7420_ini_req, seg_id_valid) },
++ { .data_type = QMI_UNSIGNED_4_BYTE, .elem_len = 1, .elem_size = sizeof(u32),
++   .array_type = NO_ARRAY, .tlv_type = 0x12,
++   .offset = offsetof(struct sr7420_ini_req, seg_id) },
++ { .data_type = QMI_OPT_FLAG, .elem_len = 1, .elem_size = sizeof(u8),
++   .array_type = NO_ARRAY, .tlv_type = 0x13,
++   .offset = offsetof(struct sr7420_ini_req, data_valid) },
++ { .data_type = QMI_DATA_LEN, .elem_len = 1, .elem_size = sizeof(u16),
++   .array_type = NO_ARRAY, .tlv_type = 0x13,
++   .offset = offsetof(struct sr7420_ini_req, data_len) },
++ { .data_type = QMI_UNSIGNED_1_BYTE, .elem_len = 6144, .elem_size = sizeof(u8),
++   .array_type = VAR_LEN_ARRAY, .tlv_type = 0x13,
++   .offset = offsetof(struct sr7420_ini_req, data) },
++ { .data_type = QMI_OPT_FLAG, .elem_len = 1, .elem_size = sizeof(u8),
++   .array_type = NO_ARRAY, .tlv_type = 0x14,
++   .offset = offsetof(struct sr7420_ini_req, end_valid) },
++ { .data_type = QMI_UNSIGNED_1_BYTE, .elem_len = 1, .elem_size = sizeof(u8),
++   .array_type = NO_ARRAY, .tlv_type = 0x14,
++   .offset = offsetof(struct sr7420_ini_req, end) },
++ { .data_type = QMI_EOTI, .array_type = NO_ARRAY },
++};
++
++static int ath12k_sr7420_qmi_ini_send(struct ath12k_base *ab)
++{
++ const struct firmware *fw;
++ struct sr7420_ini_req *req;
++ struct qmi_wlanfw_host_cap_resp_msg_v01 resp = {};
++ struct qmi_txn txn;
++ size_t off = 0;
++ int ret;
++
++ if (!sr7420_ini_download)
++  return 0;
++ BUILD_BUG_ON(offsetof(struct sr7420_ini_req, data) != 32);
++ BUILD_BUG_ON(offsetof(struct sr7420_ini_req, end_valid) != 6176);
++ fw = ath12k_core_firmware_request(ab, "fw_ini_cfg.bin");
++ if (IS_ERR(fw))
++  return PTR_ERR(fw);
++ if (!fw->size || fw->size > 256 * 1024) {
++  ret = -EINVAL;
++  goto release;
++ }
++ req = kzalloc(sizeof(*req), GFP_KERNEL);
++ if (!req) {
++  ret = -ENOMEM;
++  goto release;
++ }
++ req->file_type_valid = 1;
++ req->file_type = 0;
++ req->total_size_valid = 1;
++ req->seg_id_valid = 1;
++ req->data_valid = 1;
++ req->end_valid = 1;
++ do {
++  req->total_size = fw->size - off;
++  req->data_len = min_t(size_t, fw->size - off, sizeof(req->data));
++  req->end = (off + req->data_len == fw->size);
++  memcpy(req->data, fw->data + off, req->data_len);
++  memset(&resp, 0, sizeof(resp));
++  ret = qmi_txn_init(&ab->qmi.handle, &txn,
++                    qmi_wlanfw_host_cap_resp_msg_v01_ei, &resp);
++  if (ret < 0)
++   break;
++  ret = qmi_send_request(&ab->qmi.handle, NULL, &txn, 0x56, 6174,
++                         sr7420_ini_req_ei, req);
++  if (ret < 0) {
++   qmi_txn_cancel(&txn);
++   break;
++  }
++  ret = qmi_txn_wait(&txn, msecs_to_jiffies(ATH12K_QMI_WLANFW_TIMEOUT_MS));
++  if (ret < 0)
++   break;
++  if (resp.resp.result != QMI_RESULT_SUCCESS_V01) {
++   ath12k_warn(ab, "SR7420_INI rejected result=%u error=%u\n",
++               resp.resp.result, resp.resp.error);
++   ret = -EINVAL;
++   break;
++  }
++  off += req->data_len;
++  req->seg_id++;
++ } while (off < fw->size);
++ ath12k_info(ab, "SR7420_INI downloaded=%zu size=%zu segments=%u ret=%d\n",
++             off, fw->size, req->seg_id, ret);
++ kfree(req);
++release:
++ release_firmware(fw);
++ return ret;
++}
++
+ static int ath12k_qmi_event_host_cap(struct ath12k_qmi *qmi)
+ {
+ 	struct ath12k_base *ab = qmi->ab;
+@@ -3818,7 +3974,7 @@
+ 		return ret;
+ 	}
+ 
+-	return ret;
++	return ath12k_sr7420_qmi_ini_send(ab);
+ }
+ 
+ static void ath12k_qmi_driver_event_work(struct work_struct *work)
+--- a/drivers/net/wireless/ath/ath12k/qmi.h
++++ b/drivers/net/wireless/ath/ath12k/qmi.h
+@@ -158,7 +158,7 @@
+ 	struct dev_mem_info dev_mem[ATH12K_QMI_WLFW_MAX_DEV_MEM_NUM_V01];
+ };
+ 
+-#define QMI_WLANFW_HOST_CAP_REQ_MSG_V01_MAX_LEN		261
++#define QMI_WLANFW_HOST_CAP_REQ_MSG_V01_MAX_LEN		265
+ #define QMI_WLANFW_HOST_CAP_REQ_V01			0x0034
+ #define QMI_WLANFW_HOST_CAP_RESP_MSG_V01_MAX_LEN	7
+ #define QMI_WLFW_HOST_CAP_RESP_V01			0x0034
+@@ -256,6 +256,8 @@
+ 	struct wlfw_host_mlo_chip_info_s_v01 mlo_chip_info[QMI_WLFW_MAX_NUM_MLO_CHIPS_V01];
+ 	u8 feature_list_valid;
+ 	u64 feature_list;
++	u8 ini_cfg_support_valid;
++	u8 ini_cfg_support;
+ 
+ };
+ 
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -23,6 +23,14 @@
+ #include "wow.h"
+ 
+ static int ahb_err, pci_err;
++
++/* RAM-only board topology diagnostic, default disabled. */
++static bool sr7420_wsi_pair_diag;
++module_param_named(sr7420_wsi_pair_diag, sr7420_wsi_pair_diag, bool, 0444);
++
++static int sr7420_mem_mode = -1;
++module_param_named(sr7420_mem_mode, sr7420_mem_mode, int, 0444);
++
+ unsigned int ath12k_debug_mask;
+ module_param_named(debug_mask, ath12k_debug_mask, uint, 0644);
+ MODULE_PARM_DESC(debug_mask, "Debugging mask");
+@@ -1744,6 +1752,12 @@
+ 	unsigned long total_ram;
+ 	struct sysinfo si;
+ 
++	if (sr7420_mem_mode >= ATH12K_QMI_MEMORY_MODE_DEFAULT &&
++	    sr7420_mem_mode <= ATH12K_QMI_MEMORY_MODE_LOW_512_M) {
++		ath12k_info(ab, "SR7420_MEMORY_MODE forced=%d\n", sr7420_mem_mode);
++		return sr7420_mem_mode;
++	}
++
+ 	si_meminfo(&si);
+ 	total_ram = si.totalram * si.mem_unit;
+ 
+@@ -1850,12 +1864,42 @@
+ 	return NULL;
+ }
+ 
++/* The captured factory FW trace identifies 2 GHz as HW link 0 and 5 GHz
++ * as HW link 1.  Restrict this diagnostic to these two existing board nodes.
++ * No live device-tree mutation and no register writes are performed here.
++ */
++static int sr7420_diag_wsi_nodes(struct ath12k_hw_group *ag,
++                                struct ath12k_base *ab)
++{
++        struct device_node *two, *five;
++        int ret = -ENODEV;
++
++        two = of_find_node_by_path("/soc/pcie@15202000/pcie1_rp@0/radio@0");
++        five = of_find_node_by_path("/soc/pcie@15200000/pcie0_rp@0/radio@0");
++        if (!two || !five ||
++            (ab->dev->of_node != two && ab->dev->of_node != five))
++                goto out;
++
++        ag->wsi_node[0] = two;
++        ag->wsi_node[1] = five;
++        ag->num_devices = 2;
++        ath12k_info(ab, "SR7420_WSI topology=2g:0,5g:1 devices=2\n");
++        ret = 0;
++out:
++        of_node_put(two);
++        of_node_put(five);
++        return ret;
++}
++
+ static int ath12k_core_get_wsi_info(struct ath12k_hw_group *ag,
+ 				    struct ath12k_base *ab)
+ {
+ 	struct device_node *wsi_dev = ab->dev->of_node, *next_wsi_dev;
+ 	struct device_node *tx_endpoint, *next_rx_endpoint;
+ 	int device_count = 0;
++
++        if (sr7420_wsi_pair_diag)
++                return sr7420_diag_wsi_nodes(ag, ab);
+ 
+ 	next_wsi_dev = wsi_dev;
+ 
+@@ -1909,6 +1953,17 @@
+ {
+ 	int i, wsi_controller_index = -1, node_index = -1;
+ 	bool control;
++
++        if (sr7420_wsi_pair_diag && ag->num_devices == 2) {
++                for (i = 0; i < 2; i++) {
++                        if (ag->wsi_node[i] != ab->dev->of_node)
++                                continue;
++                        ab->wsi_info.index = i;
++                        ath12k_info(ab, "SR7420_WSI index=%d\n", i);
++                        return 0;
++                }
++                return -EINVAL;
++        }
+ 
+ 	for (i = 0; i < ag->num_devices; i++) {
+ 		control = of_property_read_bool(ag->wsi_node[i], "qcom,wsi-controller");
+@@ -2174,6 +2229,16 @@
+ 		/* even if 1 device's firmware feature indicates MLO
+ 		 * unsupported, make MLO unsupported for the whole group
+ 		 */
++        /* Legacy raw firmware lacks firmware-2.bin feature IEs.  Use the
++         * same firmware-reported fallback as the existing one-device path,
++         * only for the explicitly selected SR7420 diagnostic topology.
++         */
++        if (sr7420_wsi_pair_diag && !ab->fw.fw_features_valid &&
++            ag->num_devices == 2 && ab->single_chip_mlo_support) {
++                ath12k_info(ab, "SR7420_WSI legacy_mlo_cap device=%d supported=1\n",
++                            ab->device_id);
++                continue;
++        }
+ 		if (!ath12k_fw_feature_supported(ab, ATH12K_FW_FEATURE_MLO)) {
+ 			ag->mlo_capable = false;
+ 			return;
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -7,6 +7,7 @@
+ #include <net/mac80211.h>
+ #include <net/cfg80211.h>
+ #include <linux/etherdevice.h>
++#include <linux/moduleparam.h>
+ 
+ #include "mac.h"
+ #include "core.h"
+@@ -21,6 +22,17 @@
+ #include "hif.h"
+ #include "wow.h"
+ #include "debugfs_sta.h"
++
++static bool sr7420_start_from_conf;
++module_param_named(sr7420_start_from_conf, sr7420_start_from_conf, bool, 0600);
++
++/* Diagnostic only: wait for mac80211 to finish AP configuration. */
++static bool sr7420_defer_ap_start;
++module_param_named(sr7420_defer_ap_start, sr7420_defer_ap_start, bool, 0600);
++
++/* Diagnostic only: 1=link conf, 2=beacon IE, 3=beacon color bits. */
++static unsigned int sr7420_start_he_ops;
++module_param_named(sr7420_start_he_ops, sr7420_start_he_ops, uint, 0600);
+ 
+ #define CHAN2G(_channel, _freq, _flags) { \
+ 	.band                   = NL80211_BAND_2GHZ, \
+@@ -10565,6 +10577,40 @@
+ 	}
+ }
+ 
++/* Read the AP's actual HE Operation IE; he_oper.params is STA-populated. */
++static int ath12k_sr7420_ap_he_ops(struct ath12k_link_vif *arvif, u32 *ops)
++{
++	struct ieee80211_mutable_offsets offs = {};
++	const size_t ie_off = offsetof(struct ieee80211_mgmt, u.beacon.variable);
++	const struct element *elem;
++	struct sk_buff *bcn;
++	__le32 raw;
++	int ret = 0;
++
++	bcn = ieee80211_beacon_get_template(ath12k_ar_to_hw(arvif->ar),
++					    arvif->ahvif->vif, &offs, arvif->link_id);
++	if (!bcn)
++		return -ENOENT;
++	if (bcn->len < ie_off) {
++		ret = -EINVAL;
++		goto out;
++	}
++	elem = cfg80211_find_ext_elem(WLAN_EID_EXT_HE_OPERATION,
++				      bcn->data + ie_off, bcn->len - ie_off);
++	if (!elem || elem->datalen < 1 + sizeof(struct ieee80211_he_operation)) {
++		ret = -EINVAL;
++		goto out;
++	}
++	memcpy(&raw, elem->data + 1, sizeof(raw));
++	*ops = le32_to_cpu(raw);
++	ath12k_info(arvif->ar->ab,
++		    "SR7420_HE_BEACON vdev=%u bytes=%u he_ie_len=%u he_ops=0x%x\n",
++		    arvif->vdev_id, bcn->len, elem->datalen, *ops);
++out:
++	dev_kfree_skb(bcn);
++	return ret;
++}
++
+ static int
+ ath12k_mac_vdev_start_restart(struct ath12k_link_vif *arvif,
+ 			      struct ieee80211_chanctx_conf *ctx,
+@@ -10591,9 +10637,36 @@
+ 
+ 	reinit_completion(&ar->vdev_setup_done);
+ 
++	ath12k_info(ab,
++		    "SR7420_START_CONF vdev=%u type=%u cache_bcn=%u live_bcn=%u cache_dtim=%u live_dtim=%u cache_ssid=%u live_ssid=%u use_live=%u\n",
++		    arvif->vdev_id, ahvif->vdev_type,
++		    arvif->beacon_interval, link_conf->beacon_int,
++		    arvif->dtim_period, link_conf->dtim_period,
++		    ahvif->u.ap.ssid_len, ahvif->vif->cfg.ssid_len,
++		    sr7420_start_from_conf);
++
+ 	arg.vdev_id = arvif->vdev_id;
+ 	arg.dtim_period = arvif->dtim_period;
+ 	arg.bcn_intval = arvif->beacon_interval;
++	if (sr7420_start_from_conf && ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
++		arg.bcn_intval = link_conf->beacon_int;
++		arg.dtim_period = link_conf->dtim_period;
++	}
++	if (sr7420_start_he_ops && ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
++		arg.he_ops = link_conf->he_oper.params;
++		if (sr7420_start_he_ops >= 2 && link_conf->he_support) {
++			ret = ath12k_sr7420_ap_he_ops(arvif, &arg.he_ops);
++			if (ret)
++				return ret;
++			if (sr7420_start_he_ops == 3)
++				arg.he_ops &= IEEE80211_HE_OPERATION_BSS_COLOR_MASK |
++					IEEE80211_HE_OPERATION_PARTIAL_BSS_COLOR |
++					IEEE80211_HE_OPERATION_BSS_COLOR_DISABLED;
++		}
++		ath12k_info(ab, "SR7420_HEOPS source=%u he=%u eht=%u he_ops=0x%x\n",
++			    sr7420_start_he_ops, link_conf->he_support,
++			    link_conf->eht_support, arg.he_ops);
++	}
+ 	arg.punct_bitmap = ~arvif->punct_bitmap;
+ 
+ 	arg.freq = chandef->chan->center_freq;
+@@ -10626,6 +10699,10 @@
+ 	if (ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
+ 		arg.ssid = ahvif->u.ap.ssid;
+ 		arg.ssid_len = ahvif->u.ap.ssid_len;
++		if (sr7420_start_from_conf) {
++			arg.ssid = ahvif->vif->cfg.ssid;
++			arg.ssid_len = ahvif->vif->cfg.ssid_len;
++		}
+ 		arg.hidden_ssid = ahvif->u.ap.hidden_ssid;
+ 
+ 		/* For now allow DFS for AP mode */
+@@ -11532,6 +11609,13 @@
+ 		goto out;
+ 	}
+ 
++	if (sr7420_defer_ap_start && ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
++		ath12k_info(ab, "SR7420_DEFER_AP assigned vdev=%u freq=%u\n",
++			    arvif->vdev_id, ctx->def.chan->center_freq);
++		ret = 0;
++		goto out;
++	}
++
+ 	ret = ath12k_mac_vdev_start(arvif, ctx);
+ 	if (ret) {
+ 		ath12k_warn(ab, "failed to start vdev %i addr %pM on freq %d: %d\n",
+@@ -11545,6 +11629,47 @@
+ 	/* TODO: Setup ps and cts/rts protection */
+ 
+ out:
++	return ret;
++}
++
++/* The integer callback propagates setup failures back to hostapd. */
++static int ath12k_mac_op_sr7420_start_ap(struct ieee80211_hw *hw,
++				       struct ieee80211_vif *vif,
++				       struct ieee80211_bss_conf *info)
++{
++	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
++	struct ieee80211_chanctx_conf *ctx;
++	struct ath12k_link_vif *arvif;
++	int ret;
++
++	lockdep_assert_wiphy(hw->wiphy);
++	if (!sr7420_defer_ap_start || vif->type != NL80211_IFTYPE_AP)
++		return 0;
++
++	arvif = wiphy_dereference(hw->wiphy, ahvif->link[info->link_id]);
++	if (!arvif || !arvif->is_created)
++		return -ENOLINK;
++	if (arvif->is_started)
++		return 0;
++	ctx = wiphy_dereference(hw->wiphy, info->chanctx_conf);
++	if (!ctx || !ctx->def.chan || !info->beacon_int ||
++	    !info->dtim_period || !vif->cfg.ssid_len)
++		return -EINVAL;
++
++	arvif->beacon_interval = info->beacon_int;
++	arvif->dtim_period = info->dtim_period;
++	ahvif->u.ap.ssid_len = vif->cfg.ssid_len;
++	memcpy(ahvif->u.ap.ssid, vif->cfg.ssid, vif->cfg.ssid_len);
++	ahvif->u.ap.hidden_ssid = info->hidden_ssid;
++	ath12k_info(arvif->ar->ab,
++		    "SR7420_DEFER_AP start vdev=%u bcn=%u dtim=%u ssid_len=%u freq=%u\n",
++		    arvif->vdev_id, info->beacon_int, info->dtim_period,
++		    vif->cfg.ssid_len, ctx->def.chan->center_freq);
++	ret = ath12k_mac_vdev_start(arvif, ctx);
++	ath12k_info(arvif->ar->ab, "SR7420_DEFER_AP result vdev=%u ret=%d\n",
++		    arvif->vdev_id, ret);
++	if (!ret)
++		arvif->is_started = true;
+ 	return ret;
+ }
+ 
+@@ -11581,6 +11706,10 @@
+ 	ath12k_dbg(ab, ATH12K_DBG_MAC,
+ 		   "mac chanctx unassign ptr %p vdev_id %i\n",
+ 		   ctx, arvif->vdev_id);
++
++	if (sr7420_defer_ap_start && ahvif->vdev_type == WMI_VDEV_TYPE_AP &&
++	    !arvif->is_started)
++		return;
+ 
+ 	WARN_ON(!arvif->is_started);
+ 
+@@ -13021,6 +13150,7 @@
+ 	.tx				= ath12k_mac_op_tx,
+ 	.wake_tx_queue			= ieee80211_handle_wake_tx_queue,
+ 	.start                          = ath12k_mac_op_start,
++	.start_ap                       = ath12k_mac_op_sr7420_start_ap,
+ 	.stop                           = ath12k_mac_op_stop,
+ 	.reconfig_complete              = ath12k_mac_op_reconfig_complete,
+ 	.add_interface                  = ath12k_mac_op_add_interface,
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -1,9 +1,11 @@
++#include <linux/moduleparam.h>
+ // SPDX-License-Identifier: BSD-3-Clause-Clear
+ /*
+  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
+  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ #include <linux/skbuff.h>
++#include <linux/unaligned.h>
+ #include <linux/ctype.h>
+ #include <net/mac80211.h>
+ #include <net/cfg80211.h>
+@@ -22,6 +24,33 @@
+ #include "peer.h"
+ #include "p2p.h"
+ #include "testmode.h"
++
++static int sr7420_start_mode = -1;
++module_param_named(sr7420_start_mode, sr7420_start_mode, int, 0600);
++static bool sr7420_fw_bridge;
++module_param_named(sr7420_fw_bridge, sr7420_fw_bridge, bool, 0444);
++MODULE_PARM_DESC(sr7420_fw_bridge, "SR7420 final-send firmware ABI bridge; experimental");
++static bool sr7420_survey64;
++module_param_named(sr7420_survey64, sr7420_survey64, bool, 0444);
++MODULE_PARM_DESC(sr7420_survey64, "SR7420 bridge: negotiate 64-bit BSS channel statistics at INIT");
++static bool sr7420_stock_params = true;
++module_param_named(sr7420_stock_params, sr7420_stock_params, bool, 0444);
++MODULE_PARM_DESC(sr7420_stock_params, "Retain observed SR7420 startup parameter sequence");
++static bool sr7420_stock_profile;
++module_param_named(sr7420_stock_profile, sr7420_stock_profile, bool, 0444);
++MODULE_PARM_DESC(sr7420_stock_profile, "Grouped observed SR7420 factory startup WMI profile; RAM diagnosis only");
++static bool sr7420_diag_payload;
++module_param_named(sr7420_diag_payload, sr7420_diag_payload, bool, 0600);
++
++static void sr7420_diag_hex(struct ath12k_base *ab, const char *name,
++                            const void *data, unsigned int len)
++{
++ unsigned int off;
++ for (off = 0; off < len; off += 64)
++  ath12k_dbg(ab, ATH12K_DBG_WMI, "SR7420_HEX %s off=%u len=%u %*ph\n",
++             name, off, len, (int)min_t(unsigned int, len - off, 64),
++             (const u8 *)data + off);
++}
+ 
+ struct ath12k_wmi_svc_ready_parse {
+ 	bool wmi_svc_bitmap_done;
+@@ -429,7 +458,7 @@
+ 	return ret;
+ }
+ 
+-int ath12k_wmi_cmd_send(struct ath12k_wmi_pdev *wmi, struct sk_buff *skb,
++static int sr7420_stock32_send_base(struct ath12k_wmi_pdev *wmi, struct sk_buff *skb,
+ 			u32 cmd_id)
+ {
+ 	struct ath12k_wmi_base *wmi_ab = wmi->wmi_ab;
+@@ -450,6 +479,994 @@
+ 		ath12k_warn(wmi_ab->ab, "wmi command %d timeout\n", cmd_id);
+ 
+ 	return ret;
++}
++
++/* RAM-only SR7420 grouped stock WMI diagnostic. Exact templates are from
++ * complete factory host/firmware captures. Runtime DMA pointers are never copied.
++ * A single non-MLO AP per chip is tested; this is not a production datapath port. */
++struct sr7420_stock32_blob { u32 cmd; const u8 *data; size_t len; };
++static const u8 sr7420_stock32_create0[] = {
++	0x2c, 0x00, 0x56, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x20, 0x00, 0x12, 0x00, 0x0c, 0x00, 0x9b, 0x01, 0x00, 0x00, 0x00, 0x00,
++	0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x9b, 0x01,
++	0x01, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x12, 0x00,
++};
++static const u8 sr7420_stock32_start0[] = {
++	0x80, 0x00, 0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x64, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
++	0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x03, 0x01, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x18, 0x00, 0x50, 0x00, 0x6c, 0x09, 0x00, 0x00, 0x6c, 0x09, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x4b, 0x24, 0x00,
++	0x00, 0x24, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00, 0x08, 0x00, 0x12, 0x00,
++	0x04, 0x00, 0xd6, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00,
++};
++static const u8 sr7420_stock32_mlo0[] = {
++	0x0c, 0x00, 0xc9, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00,
++	0x04, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_ready0[] = {
++	0x04, 0x00, 0xcb, 0x03, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_peer0[] = {
++	0x10, 0x00, 0x61, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x12, 0x00,
++	0x04, 0x00, 0xd5, 0x03, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_create1[] = {
++	0x2c, 0x00, 0x56, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0xc4, 0x92, 0xd9, 0x6c, 0xaf, 0x64, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x20, 0x00, 0x12, 0x00, 0x0c, 0x00, 0x9b, 0x01, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
++	0x0f, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x9b, 0x01, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
++	0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00,
++};
++static const u8 sr7420_stock32_start1[] = {
++	0x80, 0x00, 0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x64, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
++	0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x03, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x18, 0x00, 0x50, 0x00, 0x3c, 0x14, 0x00, 0x00, 0x5a, 0x14, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x4b, 0x24, 0x00,
++	0x00, 0x24, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00, 0x08, 0x00, 0x12, 0x00,
++	0x04, 0x00, 0xd6, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00,
++};
++static const u8 sr7420_stock32_mlo1[] = {
++	0x0c, 0x00, 0xc9, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00,
++	0x04, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_ready1[] = {
++	0x04, 0x00, 0xcb, 0x03, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_peer1[] = {
++	0x10, 0x00, 0x61, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc4, 0x92, 0xd9, 0x6c, 0xaf, 0x64, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x12, 0x00, 0x04, 0x00, 0xd5, 0x03, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_init[] = {
++	0x1c, 0x00, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x01, 0xf6, 0x05, 0x00, 0x00, 0x51, 0x43, 0x41, 0x5f,
++	0x4d, 0x4c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x4c, 0x01, 0x4b, 0x00, 0x09, 0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++	0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x74, 0x04, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
++	0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++	0x64, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++	0x03, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
++	0x40, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
++	0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x03, 0x00, 0x00, 0x00, 0xc4, 0x09, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++	0xe8, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x30, 0x00, 0x00, 0x00, 0x52, 0x34, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x12, 0x00,
++};
++static const u8 sr7420_stock32_p0_0[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_1[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x01,
++};
++static const u8 sr7420_stock32_p0_2[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x02,
++};
++static const u8 sr7420_stock32_p0_3[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x03,
++};
++static const u8 sr7420_stock32_p0_4[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0xd0, 0x07, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_5[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_6[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x5b, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_7[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_8[] = {
++	0x0c, 0x00, 0x0d, 0x02, 0x01, 0x00, 0x00, 0x00, 0xe8, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_9[] = {
++	0x48, 0x00, 0xd5, 0x02, 0x01, 0x00, 0x00, 0x00, 0x88, 0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x0a, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++	0x50, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
++	0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf4, 0x01, 0x00, 0x00, 0x10, 0x27, 0x00, 0x00,
++	0xe8, 0x03, 0x00, 0x00, 0x88, 0x13, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_10[] = {
++	0x10, 0x00, 0x88, 0x03, 0x00, 0x10, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
++	0xe8, 0x03, 0x00, 0x00, 0x04, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
++	0x00, 0x00, 0x13, 0x00, 0x04, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_11[] = {
++	0x18, 0x00, 0x72, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00,
++	0x05, 0x00, 0x00, 0x00, 0x92, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_12[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x20,
++};
++static const u8 sr7420_stock32_p0_13[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x20,
++};
++static const u8 sr7420_stock32_p0_14[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x60,
++};
++static const u8 sr7420_stock32_p0_15[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xc5, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_16[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xc6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_17[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0xe0,
++};
++static const u8 sr7420_stock32_p0_18[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbe, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00,
++};
++static const u8 sr7420_stock32_p0_19[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa6, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_20[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xde, 0x00, 0x00, 0x00, 0xc8, 0x07, 0x10, 0x00,
++};
++static const u8 sr7420_stock32_p0_21[] = {
++	0x1c, 0x00, 0x8b, 0x02, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++	0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x80, 0x00, 0x12, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x9c, 0xff, 0xff, 0xff, 0x6e, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x69, 0x00, 0x00, 0x00, 0x73, 0x00, 0x00, 0x00,
++	0x32, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x6e, 0x00, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00,
++	0x5a, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x73, 0x00, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00,
++	0x64, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_22[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_23[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xec, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p0_24[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const struct sr7420_stock32_blob sr7420_stock32_p0[] = {
++	{ 0x4003, sr7420_stock32_p0_0, sizeof(sr7420_stock32_p0_0) },
++	{ 0x4003, sr7420_stock32_p0_1, sizeof(sr7420_stock32_p0_1) },
++	{ 0x4003, sr7420_stock32_p0_2, sizeof(sr7420_stock32_p0_2) },
++	{ 0x4003, sr7420_stock32_p0_3, sizeof(sr7420_stock32_p0_3) },
++	{ 0x4003, sr7420_stock32_p0_4, sizeof(sr7420_stock32_p0_4) },
++	{ 0x4003, sr7420_stock32_p0_5, sizeof(sr7420_stock32_p0_5) },
++	{ 0x4003, sr7420_stock32_p0_6, sizeof(sr7420_stock32_p0_6) },
++	{ 0x4003, sr7420_stock32_p0_7, sizeof(sr7420_stock32_p0_7) },
++	{ 0x4021, sr7420_stock32_p0_8, sizeof(sr7420_stock32_p0_8) },
++	{ 0x3e001, sr7420_stock32_p0_9, sizeof(sr7420_stock32_p0_9) },
++	{ 0x1600f, sr7420_stock32_p0_10, sizeof(sr7420_stock32_p0_10) },
++	{ 0x4029, sr7420_stock32_p0_11, sizeof(sr7420_stock32_p0_11) },
++	{ 0x4003, sr7420_stock32_p0_12, sizeof(sr7420_stock32_p0_12) },
++	{ 0x4003, sr7420_stock32_p0_13, sizeof(sr7420_stock32_p0_13) },
++	{ 0x4003, sr7420_stock32_p0_14, sizeof(sr7420_stock32_p0_14) },
++	{ 0x4003, sr7420_stock32_p0_15, sizeof(sr7420_stock32_p0_15) },
++	{ 0x4003, sr7420_stock32_p0_16, sizeof(sr7420_stock32_p0_16) },
++	{ 0x4003, sr7420_stock32_p0_17, sizeof(sr7420_stock32_p0_17) },
++	{ 0x4003, sr7420_stock32_p0_18, sizeof(sr7420_stock32_p0_18) },
++	{ 0x4003, sr7420_stock32_p0_19, sizeof(sr7420_stock32_p0_19) },
++	{ 0x4003, sr7420_stock32_p0_20, sizeof(sr7420_stock32_p0_20) },
++	{ 0x1d017, sr7420_stock32_p0_21, sizeof(sr7420_stock32_p0_21) },
++	{ 0x4003, sr7420_stock32_p0_22, sizeof(sr7420_stock32_p0_22) },
++	{ 0x4003, sr7420_stock32_p0_23, sizeof(sr7420_stock32_p0_23) },
++	{ 0x4003, sr7420_stock32_p0_24, sizeof(sr7420_stock32_p0_24) },
++};
++static const u8 sr7420_stock32_v0_0[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x93, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_1[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x27, 0x01, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_2[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x2c, 0x01, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_3[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_4[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1d, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_5[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_6[] = {
++	0x10, 0x00, 0x0e, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x10, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_7[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00, 0xfb, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_8[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x87, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_9[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x80, 0x00, 0x00, 0xfb, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_10[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_11[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_12[] = {
++	0x08, 0x00, 0x2e, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_13[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_14[] = {
++	0x08, 0x00, 0xee, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_15[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_16[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_17[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_18[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v0_19[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const struct sr7420_stock32_blob sr7420_stock32_v0[] = {
++	{ 0x5008, sr7420_stock32_v0_0, sizeof(sr7420_stock32_v0_0) },
++	{ 0x5008, sr7420_stock32_v0_1, sizeof(sr7420_stock32_v0_1) },
++	{ 0x5008, sr7420_stock32_v0_2, sizeof(sr7420_stock32_v0_2) },
++	{ 0x5008, sr7420_stock32_v0_3, sizeof(sr7420_stock32_v0_3) },
++	{ 0x5008, sr7420_stock32_v0_4, sizeof(sr7420_stock32_v0_4) },
++	{ 0x5008, sr7420_stock32_v0_5, sizeof(sr7420_stock32_v0_5) },
++	{ 0x5019, sr7420_stock32_v0_6, sizeof(sr7420_stock32_v0_6) },
++	{ 0x5008, sr7420_stock32_v0_7, sizeof(sr7420_stock32_v0_7) },
++	{ 0x5008, sr7420_stock32_v0_8, sizeof(sr7420_stock32_v0_8) },
++	{ 0x5008, sr7420_stock32_v0_9, sizeof(sr7420_stock32_v0_9) },
++	{ 0x5008, sr7420_stock32_v0_10, sizeof(sr7420_stock32_v0_10) },
++	{ 0x5008, sr7420_stock32_v0_11, sizeof(sr7420_stock32_v0_11) },
++	{ 0x5033, sr7420_stock32_v0_12, sizeof(sr7420_stock32_v0_12) },
++	{ 0x5008, sr7420_stock32_v0_13, sizeof(sr7420_stock32_v0_13) },
++	{ 0x502d, sr7420_stock32_v0_14, sizeof(sr7420_stock32_v0_14) },
++	{ 0x5008, sr7420_stock32_v0_15, sizeof(sr7420_stock32_v0_15) },
++	{ 0x5008, sr7420_stock32_v0_16, sizeof(sr7420_stock32_v0_16) },
++	{ 0x5008, sr7420_stock32_v0_17, sizeof(sr7420_stock32_v0_17) },
++	{ 0x5008, sr7420_stock32_v0_18, sizeof(sr7420_stock32_v0_18) },
++	{ 0x5008, sr7420_stock32_v0_19, sizeof(sr7420_stock32_v0_19) },
++};
++static const u8 sr7420_stock32_p1_0[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_1[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x01,
++};
++static const u8 sr7420_stock32_p1_2[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x02,
++};
++static const u8 sr7420_stock32_p1_3[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x03,
++};
++static const u8 sr7420_stock32_p1_4[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0xd0, 0x07, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_5[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_6[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x5b, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_7[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_8[] = {
++	0x0c, 0x00, 0x0d, 0x02, 0x01, 0x00, 0x00, 0x00, 0xe8, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_9[] = {
++	0x48, 0x00, 0xd5, 0x02, 0x01, 0x00, 0x00, 0x00, 0x88, 0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x0a, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++	0x50, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
++	0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf4, 0x01, 0x00, 0x00, 0x10, 0x27, 0x00, 0x00,
++	0xe8, 0x03, 0x00, 0x00, 0x88, 0x13, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_10[] = {
++	0x18, 0x00, 0x72, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00,
++	0x05, 0x00, 0x00, 0x00, 0x92, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_11[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x20,
++};
++static const u8 sr7420_stock32_p1_12[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x20,
++};
++static const u8 sr7420_stock32_p1_13[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x60,
++};
++static const u8 sr7420_stock32_p1_14[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xc5, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_15[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xc6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_16[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0xe0,
++};
++static const u8 sr7420_stock32_p1_17[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xbe, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00,
++};
++static const u8 sr7420_stock32_p1_18[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa6, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_19[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xde, 0x00, 0x00, 0x00, 0xc8, 0x07, 0x10, 0x00,
++};
++static const u8 sr7420_stock32_p1_20[] = {
++	0x1c, 0x00, 0x8b, 0x02, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++	0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x80, 0x00, 0x12, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x9c, 0xff, 0xff, 0xff, 0x6e, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x69, 0x00, 0x00, 0x00, 0x73, 0x00, 0x00, 0x00,
++	0x32, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x6e, 0x00, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00,
++	0x5a, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x8c, 0x02, 0x73, 0x00, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00,
++	0x64, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_21[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_22[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0xec, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_p1_23[] = {
++	0x0c, 0x00, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const struct sr7420_stock32_blob sr7420_stock32_p1[] = {
++	{ 0x4003, sr7420_stock32_p1_0, sizeof(sr7420_stock32_p1_0) },
++	{ 0x4003, sr7420_stock32_p1_1, sizeof(sr7420_stock32_p1_1) },
++	{ 0x4003, sr7420_stock32_p1_2, sizeof(sr7420_stock32_p1_2) },
++	{ 0x4003, sr7420_stock32_p1_3, sizeof(sr7420_stock32_p1_3) },
++	{ 0x4003, sr7420_stock32_p1_4, sizeof(sr7420_stock32_p1_4) },
++	{ 0x4003, sr7420_stock32_p1_5, sizeof(sr7420_stock32_p1_5) },
++	{ 0x4003, sr7420_stock32_p1_6, sizeof(sr7420_stock32_p1_6) },
++	{ 0x4003, sr7420_stock32_p1_7, sizeof(sr7420_stock32_p1_7) },
++	{ 0x4021, sr7420_stock32_p1_8, sizeof(sr7420_stock32_p1_8) },
++	{ 0x3e001, sr7420_stock32_p1_9, sizeof(sr7420_stock32_p1_9) },
++	{ 0x4029, sr7420_stock32_p1_10, sizeof(sr7420_stock32_p1_10) },
++	{ 0x4003, sr7420_stock32_p1_11, sizeof(sr7420_stock32_p1_11) },
++	{ 0x4003, sr7420_stock32_p1_12, sizeof(sr7420_stock32_p1_12) },
++	{ 0x4003, sr7420_stock32_p1_13, sizeof(sr7420_stock32_p1_13) },
++	{ 0x4003, sr7420_stock32_p1_14, sizeof(sr7420_stock32_p1_14) },
++	{ 0x4003, sr7420_stock32_p1_15, sizeof(sr7420_stock32_p1_15) },
++	{ 0x4003, sr7420_stock32_p1_16, sizeof(sr7420_stock32_p1_16) },
++	{ 0x4003, sr7420_stock32_p1_17, sizeof(sr7420_stock32_p1_17) },
++	{ 0x4003, sr7420_stock32_p1_18, sizeof(sr7420_stock32_p1_18) },
++	{ 0x4003, sr7420_stock32_p1_19, sizeof(sr7420_stock32_p1_19) },
++	{ 0x1d017, sr7420_stock32_p1_20, sizeof(sr7420_stock32_p1_20) },
++	{ 0x4003, sr7420_stock32_p1_21, sizeof(sr7420_stock32_p1_21) },
++	{ 0x4003, sr7420_stock32_p1_22, sizeof(sr7420_stock32_p1_22) },
++	{ 0x4003, sr7420_stock32_p1_23, sizeof(sr7420_stock32_p1_23) },
++};
++static const u8 sr7420_stock32_v1_0[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x93, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_1[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x27, 0x01, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_2[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x2c, 0x01, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_3[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_4[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1d, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_5[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_6[] = {
++	0x10, 0x00, 0x0e, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x10, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_7[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00, 0xfb, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_8[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x87, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_9[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x80, 0x00, 0x00, 0xfb, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_10[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_11[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_12[] = {
++	0x08, 0x00, 0x2e, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_13[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_14[] = {
++	0x08, 0x00, 0xee, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_15[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_16[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_17[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const u8 sr7420_stock32_v1_18[] = {
++	0x0c, 0x00, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++};
++static const struct sr7420_stock32_blob sr7420_stock32_v1[] = {
++	{ 0x5008, sr7420_stock32_v1_0, sizeof(sr7420_stock32_v1_0) },
++	{ 0x5008, sr7420_stock32_v1_1, sizeof(sr7420_stock32_v1_1) },
++	{ 0x5008, sr7420_stock32_v1_2, sizeof(sr7420_stock32_v1_2) },
++	{ 0x5008, sr7420_stock32_v1_3, sizeof(sr7420_stock32_v1_3) },
++	{ 0x5008, sr7420_stock32_v1_4, sizeof(sr7420_stock32_v1_4) },
++	{ 0x5008, sr7420_stock32_v1_5, sizeof(sr7420_stock32_v1_5) },
++	{ 0x5019, sr7420_stock32_v1_6, sizeof(sr7420_stock32_v1_6) },
++	{ 0x5008, sr7420_stock32_v1_7, sizeof(sr7420_stock32_v1_7) },
++	{ 0x5008, sr7420_stock32_v1_8, sizeof(sr7420_stock32_v1_8) },
++	{ 0x5008, sr7420_stock32_v1_9, sizeof(sr7420_stock32_v1_9) },
++	{ 0x5008, sr7420_stock32_v1_10, sizeof(sr7420_stock32_v1_10) },
++	{ 0x5008, sr7420_stock32_v1_11, sizeof(sr7420_stock32_v1_11) },
++	{ 0x5033, sr7420_stock32_v1_12, sizeof(sr7420_stock32_v1_12) },
++	{ 0x5008, sr7420_stock32_v1_13, sizeof(sr7420_stock32_v1_13) },
++	{ 0x502d, sr7420_stock32_v1_14, sizeof(sr7420_stock32_v1_14) },
++	{ 0x5008, sr7420_stock32_v1_15, sizeof(sr7420_stock32_v1_15) },
++	{ 0x5008, sr7420_stock32_v1_16, sizeof(sr7420_stock32_v1_16) },
++	{ 0x5008, sr7420_stock32_v1_17, sizeof(sr7420_stock32_v1_17) },
++	{ 0x5008, sr7420_stock32_v1_18, sizeof(sr7420_stock32_v1_18) },
++};
++static const u8 sr7420_stock32_country[] = {
++	0x0c, 0x00, 0x87, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x43, 0x4e, 0x04, 0x00,
++};
++
++
++struct sr7420_stock32_state {
++ unsigned long flags;
++ unsigned long vdev_configured;
++ unsigned long vdev_up;
++ u8 vdev_mac[9][ETH_ALEN];
++};
++static struct sr7420_stock32_state sr7420_stock32_state[2];
++
++static void sr7420_stock32_trace(struct ath12k_wmi_pdev *wmi, struct sk_buff *skb, u32 id)
++{
++ char name[32];
++ ath12k_info(wmi->wmi_ab->ab, "SR7420_STOCK32_TX cmd=0x%x bytes=%u\n", id, skb->len);
++ if (sr7420_diag_payload && (id == 1 || id == 0x5001 || id == 0x5003 ||
++     id == 0x48002 || id == 0x48003 || id == 0x4003 || id == 0x5008 || id == 0x6001)) {
++  snprintf(name, sizeof(name), "stock32-%06x", id);
++  sr7420_diag_hex(wmi->wmi_ab->ab, name, skb->data, skb->len);
++ }
++}
++
++static int sr7420_stock32_blob_send(struct ath12k_wmi_pdev *wmi, u32 id,
++                                  const u8 *data, size_t len, int vdev)
++{
++ struct sk_buff *skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
++ int ret;
++ if (!skb) return -ENOMEM;
++ memcpy(skb->data, data, len);
++ if (vdev >= 0) put_unaligned_le32(vdev, skb->data + 4);
++ sr7420_stock32_trace(wmi, skb, id);
++ ret = sr7420_stock32_send_base(wmi, skb, id);
++ if (ret) dev_kfree_skb(skb);
++ return ret;
++}
++
++static int sr7420_stock32_replace(struct sk_buff *skb, const u8 *data, size_t len)
++{
++ int extra = (int)len - (int)skb->len;
++ int ret;
++ if (extra > 0) {
++  if (skb_tailroom(skb) < extra) {
++   ret = pskb_expand_head(skb, 0, extra - skb_tailroom(skb), GFP_KERNEL);
++   if (ret) return ret;
++  }
++  skb_put(skb, extra);
++ } else if (extra < 0) {
++  skb_trim(skb, len);
++ }
++ memcpy(skb->data, data, len);
++ return 0;
++}
++
++static int sr7420_stock32_pdev(struct ath12k_wmi_pdev *wmi, int radio, int domain)
++{
++ const struct sr7420_stock32_blob *seq;
++ size_t count, i;
++ int ret;
++ if (test_and_set_bit(0, &sr7420_stock32_state[domain].flags)) return 0;
++ if (radio) { seq = sr7420_stock32_p1; count = ARRAY_SIZE(sr7420_stock32_p1); }
++ else { seq = sr7420_stock32_p0; count = ARRAY_SIZE(sr7420_stock32_p0); }
++ for (i = 0; i < count; i++) {
++  ret = sr7420_stock32_blob_send(wmi, seq[i].cmd, seq[i].data, seq[i].len, -1);
++  if (ret) return ret;
++ }
++ return 0;
++}
++
++static int sr7420_stock32_vdev(struct ath12k_wmi_pdev *wmi, int radio, int domain, u32 vdev)
++{
++ const struct sr7420_stock32_blob *seq;
++ size_t count, i;
++ int ret;
++ if (vdev >= 9) return -EINVAL;
++ if (test_and_set_bit(vdev, &sr7420_stock32_state[domain].vdev_configured)) return 0;
++ ret = sr7420_stock32_blob_send(wmi, 0x3a004, sr7420_stock32_country,
++                              sizeof(sr7420_stock32_country), -1);
++ if (ret) return ret;
++ if (radio) { seq = sr7420_stock32_v1; count = ARRAY_SIZE(sr7420_stock32_v1); }
++ else { seq = sr7420_stock32_v0; count = ARRAY_SIZE(sr7420_stock32_v0); }
++ for (i = 0; i < count; i++) {
++  ret = sr7420_stock32_blob_send(wmi, seq[i].cmd, seq[i].data, seq[i].len, vdev);
++  if (ret) return ret;
++ }
++ return 0;
++}
++
++/* SR7420 firmware wire ABI adapter. No DMA addresses are replayed.
++ * Input is the complete ath12k-generated WMI payload, before the command header.
++ * Only verified layout conversions are accepted; real MLO remains unsupported.
++ */
++static int sr7420_fw37_tlv(const u8 *p, size_t len, size_t off,
++                          u32 tag, size_t *size)
++{
++ u32 h;
++ if (off > len || len - off < 4)
++  return -EINVAL;
++ h = get_unaligned_le32(p + off);
++ *size = (h & 0xffff) + 4;
++ if ((h >> 16) != tag || *size > len - off || (*size & 3))
++  return -EINVAL;
++ return 0;
++}
++
++static int sr7420_fw37_wire(u32 id, int radio, const u8 *p, size_t len,
++                           u8 *out, size_t cap, size_t *used)
++{
++ size_t fixed, n, off, a, j;
++ u32 value, band;
++ const u8 *stock;
++ struct ath12k_wmi_resource_config_params *cfg;
++
++ *used = 0;
++ if (radio < 0 || radio > 1 || len < 4 || (len & 3))
++  return -EINVAL;
++ switch (id) {
++ case WMI_INIT_CMDID:
++  if (cap < sizeof(sr7420_stock32_init) ||
++      sr7420_fw37_tlv(p, len, 0, WMI_TAG_INIT_CMD, &fixed) || fixed != 32 ||
++      get_unaligned_le32(p + 28) != 0 ||
++      sr7420_fw37_tlv(p, len, fixed, WMI_TAG_RESOURCE_CONFIG, &n) ||
++      (n != 292 && n != 336) ||
++      sr7420_fw37_tlv(p, len, fixed + n, WMI_TAG_ARRAY_STRUCT, &a) || a != 4)
++   return -EINVAL;
++  if (get_unaligned_le32(p + fixed + 4) != 9 ||
++      get_unaligned_le32(p + fixed + 8) != 137)
++   return -EOPNOTSUPP;
++  /* Optional HW-mode setup belongs to the upstream encoder. The captured
++   * firmware already uses the paired radio mode. Validate before omitting. */
++  off = fixed + n + a;
++  if (off < len) {
++   if (sr7420_fw37_tlv(p, len, off, WMI_TAG_PDEV_SET_HW_MODE_CMD, &a) ||
++       a != 16 || off + a + 4 > len)
++    return -EINVAL;
++   value = get_unaligned_le32(p + off + 12);
++   off += a;
++   if (sr7420_fw37_tlv(p, len, off, WMI_TAG_ARRAY_STRUCT, &a) ||
++       value > 2 || a != 4 + value * 16 || off + a != len)
++    return -EOPNOTSUPP;
++   for (j = 0; j < value; j++) {
++    size_t inner;
++    if (sr7420_fw37_tlv(p, len, off + 4 + j * 16,
++                        WMI_TAG_PDEV_BAND_TO_MAC, &inner) || inner != 16)
++     return -EINVAL;
++   }
++  }
++  memcpy(out, sr7420_stock32_init, sizeof(sr7420_stock32_init));
++  memcpy(out + fixed, p + fixed, 292);
++  cfg = (void *)(out + fixed);
++  cfg->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_RESOURCE_CONFIG, 336);
++  cfg->num_tids = cpu_to_le32(1140);
++  cfg->rx_decap_mode = cpu_to_le32(ATH12K_HW_TXRX_ETHERNET);
++  cfg->max_frag_entries = cpu_to_le32(6);
++  cfg->beacon_tx_offload_max_vdev = cfg->num_vdevs;
++  cfg->flag1 = cpu_to_le32(sr7420_survey64 ?
++                         WMI_RSRC_CFG_FLAG1_BSS_CHANNEL_INFO_64 : 0);
++  cfg->use_pdev_id = cpu_to_le32(1);
++  cfg->max_bssid_indicator = cpu_to_le32(5);
++  cfg->flags2 = le32_encode_bits(ATH12K_PEER_METADATA_V1B,
++                     WMI_RSRC_CFG_FLAGS2_RX_PEER_METADATA_VERSION);
++  cfg->host_service_flags = cpu_to_le32(0x3452);
++  cfg->max_rnr_neighbours = cpu_to_le32(16);
++  cfg->ema_max_vap_cnt = 0;
++  cfg->ema_max_profile_period = 0;
++  *used = sizeof(sr7420_stock32_init);
++  return 0;
++ case WMI_VDEV_CREATE_CMDID:
++  if (cap < 88 || sr7420_fw37_tlv(p, len, 0, WMI_TAG_VDEV_CREATE_CMD, &fixed) ||
++      fixed != 48 || get_unaligned_le32(p + 4) >= 9 ||
++      get_unaligned_le32(p + 8) != WMI_VDEV_TYPE_AP ||
++      get_unaligned_le32(p + 24) != 2 ||
++      sr7420_fw37_tlv(p, len, fixed, WMI_TAG_ARRAY_STRUCT, &a) || a != 36)
++   return -EOPNOTSUPP;
++  off = fixed + a;
++  if (off < len && (sr7420_fw37_tlv(p, len, off, WMI_TAG_ARRAY_STRUCT, &n) ||
++                    n != 4 || off + n != len))
++   return -EOPNOTSUPP; /* Do not discard a real MLD address. */
++  stock = radio ? sr7420_stock32_create1 : sr7420_stock32_create0;
++  memcpy(out, stock, 88);
++  memcpy(out, p, 48); /* vdev/type/MAC/pdev/flags/stats remain dynamic. */
++  value = 0;
++  for (j = 0; j < 2; j++) {
++   off = 52 + j * 16;
++   if (sr7420_fw37_tlv(p, len, off, WMI_TAG_VDEV_TXRX_STREAMS, &n) || n != 16)
++    return -EINVAL;
++   band = get_unaligned_le32(p + off + 4);
++   if (band > 1 || (value & (1U << band)))
++    return -EINVAL;
++   value |= 1U << band;
++   memcpy(out + 52 + band * 16, p + off, 16);
++   /* Vendor interpretation is not fully established; use its known default.
++    * START preferred TX/RX stream counts remain sourced from ath12k. */
++   put_unaligned_le32(0xf, out + 52 + band * 16 + 8);
++   put_unaligned_le32(0xf, out + 52 + band * 16 + 12);
++  }
++  *used = 88;
++  return 0;
++ case WMI_VDEV_START_REQUEST_CMDID:
++ case WMI_VDEV_RESTART_REQUEST_CMDID:
++  if (cap < 180 ||
++      sr7420_fw37_tlv(p, len, 0, WMI_TAG_VDEV_START_REQUEST_CMD, &fixed) ||
++      (fixed != 116 && fixed != 132) ||
++      get_unaligned_le32(p + 4) >= 9 || get_unaligned_le32(p + 24) > 32 ||
++      get_unaligned_le32(p + 68) != 0 ||
++      sr7420_fw37_tlv(p, len, fixed, WMI_TAG_CHANNEL, &n) || n != 28 ||
++      sr7420_fw37_tlv(p, len, fixed + n, WMI_TAG_ARRAY_STRUCT, &a) || a != 4)
++   return -EINVAL;
++  off = fixed + n + a;
++  if (off < len) {
++   if (sr7420_fw37_tlv(p, len, off, WMI_TAG_ARRAY_STRUCT, &a))
++    return -EINVAL;
++   if (a == 12) {
++    if (sr7420_fw37_tlv(p, len, off + 4, WMI_TAG_MLO_VDEV_START_PARAMS, &n) ||
++        n != 8 || get_unaligned_le32(p + off + 8))
++     return -EOPNOTSUPP;
++   } else if (a != 4) {
++    return -EOPNOTSUPP;
++   }
++   off += a;
++   if (sr7420_fw37_tlv(p, len, off, WMI_TAG_ARRAY_STRUCT, &a) ||
++       a != 4 || off + a != len)
++    return -EOPNOTSUPP;
++  }
++  value = get_unaligned_le32(p + fixed + 4);
++  if ((!radio && (value < 2400 || value >= 2500)) ||
++      (radio && (value < 4900 || value >= 5925)))
++   return -EOPNOTSUPP;
++  stock = radio ? sr7420_stock32_start1 : sr7420_stock32_start0;
++  memcpy(out, stock, 180);
++  memcpy(out, p, fixed);
++  put_unaligned_le32((WMI_TAG_VDEV_START_REQUEST_CMD << 16) | 128, out);
++  memcpy(out + 132, p + fixed, 28);
++  if (!get_unaligned_le32(p + 60)) {
++   put_unaligned_le32(radio ? 0x10000003 : 0x10000103, out + 60);
++   put_unaligned_le32(get_unaligned_le32(p + 20) | (1U << 2), out + 20);
++  }
++  *used = 180;
++  return 0;
++ case WMI_MLO_SETUP_CMDID:
++  if (sr7420_fw37_tlv(p, len, 0, WMI_TAG_MLO_SETUP_CMD, &fixed) ||
++      (fixed != 12 && fixed != 16) ||
++      sr7420_fw37_tlv(p, len, fixed, WMI_TAG_ARRAY_UINT32, &a) ||
++      a > 8 || fixed + a != len || cap < 16 + a)
++   return -EINVAL;
++  if (fixed == 16 && get_unaligned_le32(p + 12) != 137)
++   return -EOPNOTSUPP;
++  memcpy(out, p, 12);
++  put_unaligned_le32((WMI_TAG_MLO_SETUP_CMD << 16) | 12, out);
++  put_unaligned_le32(137, out + 12);
++  memcpy(out + 16, p + fixed, a);
++  *used = 16 + a;
++  return 0;
++ case WMI_PEER_CREATE_CMDID:
++  if (sr7420_fw37_tlv(p, len, 0, WMI_TAG_PEER_CREATE_CMD, &fixed) ||
++      fixed != 20 || len != 32 || get_unaligned_le32(p + 4) >= 9 ||
++      sr7420_fw37_tlv(p, len, 20, WMI_TAG_ARRAY_STRUCT, &a) || a != 12 ||
++      sr7420_fw37_tlv(p, len, 24, WMI_TAG_MLO_PEER_CREATE_PARAMS, &a) ||
++      a != 8 || get_unaligned_le32(p + 28))
++   return -EINVAL;
++  /* Actual station MAC/type/flags are already wire compatible. */
++  return 0;
++ case WMI_MLO_READY_CMDID:
++  if (sr7420_fw37_tlv(p, len, 0, WMI_TAG_MLO_READY_CMD, &fixed) ||
++      fixed != 8 || len != 8)
++   return -EINVAL;
++  return 0;
++ default:
++  return 0;
++ }
++}
++
++static int sr7420_fw37_send(struct ath12k_wmi_pdev *wmi, struct sk_buff *skb,
++                          u32 cmd_id)
++{
++ struct ath12k_base *ab = wmi->wmi_ab->ab;
++ struct sr7420_stock32_state *st;
++ int domain, radio, ret;
++ u8 translated[384];
++ size_t translated_len;
++ u32 vdev = 0;
++ char name[32];
++
++ if (sr7420_stock_profile || !dev_is_pci(ab->dev))
++  return -EINVAL;
++ domain = pci_domain_nr(to_pci_dev(ab->dev)->bus);
++ if (domain < 0 || domain > 1)
++  return -ENODEV;
++ radio = domain == 0;
++ st = &sr7420_stock32_state[domain];
++ ret = sr7420_fw37_wire(cmd_id, radio, skb->data, skb->len,
++                       translated, sizeof(translated), &translated_len);
++ if (ret) {
++  ath12k_warn(ab, "SR7420_BRIDGE37_REJECT cmd=0x%x bytes=%u error=%d\n",
++              cmd_id, skb->len, ret);
++  return ret;
++ }
++ if (translated_len) {
++  ret = sr7420_stock32_replace(skb, translated, translated_len);
++  if (ret)
++   return ret;
++ }
++
++ if (cmd_id == WMI_INIT_CMDID) {
++  memset(st, 0, sizeof(*st));
++  ab->wow.wmi_conf_rx_decap_mode = ATH12K_HW_TXRX_ETHERNET;
++  ab->dp.peer_metadata_ver = ATH12K_PEER_METADATA_V1B;
++  ath12k_info(ab, "SR7420_SURVEY39_INIT enabled=%u advertised=%u flag1=0x%x\n",
++              sr7420_survey64,
++              test_bit(WMI_TLV_SERVICE_BSS_CHANNEL_INFO_64, ab->wmi_ab.svc_map),
++              sr7420_survey64 ? (unsigned int)WMI_RSRC_CFG_FLAG1_BSS_CHANNEL_INFO_64 : 0);
++  /* Keep host queries consistent with the negotiated resource flags. */
++  if (!sr7420_survey64)
++   clear_bit(WMI_TLV_SERVICE_BSS_CHANNEL_INFO_64, ab->wmi_ab.svc_map);
++ } else if (cmd_id == WMI_VDEV_CREATE_CMDID) {
++  if (skb->len < sizeof(struct wmi_vdev_create_cmd))
++   return -EINVAL;
++  vdev = get_unaligned_le32(skb->data + 4);
++  if (vdev >= ARRAY_SIZE(st->vdev_mac))
++   return -EOPNOTSUPP;
++  ether_addr_copy(st->vdev_mac[vdev], skb->data + 16);
++  clear_bit(vdev, &st->vdev_configured);
++  clear_bit(vdev, &st->vdev_up);
++ } else if (cmd_id == WMI_VDEV_DELETE_CMDID) {
++  if (skb->len < 8)
++   return -EINVAL;
++  vdev = get_unaligned_le32(skb->data + 4);
++  if (vdev < ARRAY_SIZE(st->vdev_mac)) {
++   eth_zero_addr(st->vdev_mac[vdev]);
++   clear_bit(vdev, &st->vdev_configured);
++   clear_bit(vdev, &st->vdev_up);
++  }
++ }
++ if (sr7420_stock_params) {
++  bool suppress = false;
++
++  if (cmd_id == WMI_MLO_SETUP_CMDID) {
++   ret = sr7420_stock32_pdev(wmi, radio, domain);
++   if (ret)
++    return ret;
++  }
++  if (cmd_id == WMI_PEER_CREATE_CMDID ||
++      cmd_id == WMI_VDEV_START_REQUEST_CMDID ||
++      cmd_id == WMI_VDEV_RESTART_REQUEST_CMDID) {
++   if (skb->len < 20)
++    return -EINVAL;
++   vdev = get_unaligned_le32(skb->data + 4);
++   if (vdev >= ARRAY_SIZE(st->vdev_mac))
++    return -EOPNOTSUPP;
++   /* Never turn an associated station into a self peer. */
++   if (cmd_id == WMI_VDEV_START_REQUEST_CMDID ||
++       cmd_id == WMI_VDEV_RESTART_REQUEST_CMDID ||
++       ether_addr_equal(st->vdev_mac[vdev], skb->data + 8)) {
++    ret = sr7420_stock32_vdev(wmi, radio, domain, vdev);
++    if (ret)
++     return ret;
++   }
++  }
++  switch (cmd_id) {
++  case WMI_VDEV_SET_PARAM_CMDID:
++  case 0x5019: case 0x5033: case 0x502d:
++   if (skb->len < 8)
++    return -EINVAL;
++   vdev = get_unaligned_le32(skb->data + 4);
++   suppress = vdev < ARRAY_SIZE(st->vdev_mac) &&
++              !test_bit(vdev, &st->vdev_up);
++   break;
++  case WMI_PDEV_SET_PARAM_CMDID:
++  case 0x4001: case 0x3a004: case 0x3e001: case 0x4021:
++  case 0x4029: case 0x1600f: case 0x1d017:
++   suppress = !st->vdev_up;
++   break;
++  }
++  if (suppress) {
++   ath12k_info(ab, "SR7420_BRIDGE37_BOOTSTRAP_SKIP cmd=0x%x bytes=%u\n",
++               cmd_id, skb->len);
++   dev_kfree_skb(skb);
++   return 0;
++  }
++ }
++ ath12k_info(ab, "SR7420_BRIDGE37_TX cmd=0x%x bytes=%u stock_params=%u\n",
++             cmd_id, skb->len, sr7420_stock_params);
++ if (sr7420_diag_payload &&
++     (cmd_id == WMI_INIT_CMDID || cmd_id == WMI_VDEV_CREATE_CMDID ||
++      cmd_id == WMI_VDEV_START_REQUEST_CMDID ||
++      cmd_id == WMI_VDEV_RESTART_REQUEST_CMDID ||
++      cmd_id == WMI_PEER_CREATE_CMDID || cmd_id == WMI_MLO_SETUP_CMDID ||
++      cmd_id == WMI_MLO_READY_CMDID)) {
++  snprintf(name, sizeof(name), "bridge37-%06x", cmd_id);
++  sr7420_diag_hex(ab, name, skb->data, skb->len);
++ }
++ if (cmd_id == WMI_VDEV_UP_CMDID || cmd_id == WMI_VDEV_DOWN_CMDID ||
++     cmd_id == WMI_VDEV_STOP_CMDID) {
++  if (skb->len < 8)
++   return -EINVAL;
++  vdev = get_unaligned_le32(skb->data + 4);
++ }
++ ret = sr7420_stock32_send_base(wmi, skb, cmd_id);
++ if (!ret && cmd_id == WMI_VDEV_UP_CMDID) {
++  if (vdev < ARRAY_SIZE(st->vdev_mac))
++   set_bit(vdev, &st->vdev_up);
++ }
++ if (!ret && (cmd_id == WMI_VDEV_DOWN_CMDID || cmd_id == WMI_VDEV_STOP_CMDID) &&
++     vdev < ARRAY_SIZE(st->vdev_mac))
++  clear_bit(vdev, &st->vdev_up);
++ return ret;
++}
++
++int ath12k_wmi_cmd_send(struct ath12k_wmi_pdev *wmi, struct sk_buff *skb, u32 cmd_id)
++{
++ struct ath12k_base *ab = wmi->wmi_ab->ab;
++ const u8 *data = NULL;
++ size_t len = 0;
++ u32 vdev = 0, freq = 0, center = 0;
++ u8 mac[8];
++ int domain, radio, ret;
++ if (sr7420_fw_bridge) return sr7420_fw37_send(wmi, skb, cmd_id);
++ if (!sr7420_stock_profile) return sr7420_stock32_send_base(wmi, skb, cmd_id);
++ if (!dev_is_pci(ab->dev)) return -ENODEV;
++ domain = pci_domain_nr(to_pci_dev(ab->dev)->bus);
++ if (domain < 0 || domain > 1) return -ENODEV;
++ radio = domain == 0; /* domain1=2.4GHz, domain0=5GHz, independently verified */
++ if (cmd_id == 1) {
++  if (skb->len < 64 || get_unaligned_le32(skb->data + 28) != 0 ||
++      get_unaligned_le32(skb->data + 36) != 9 ||
++      get_unaligned_le32(skb->data + 40) != 137) return -EINVAL;
++  memset(&sr7420_stock32_state[domain], 0, sizeof(sr7420_stock32_state[domain]));
++  ab->wow.wmi_conf_rx_decap_mode = ATH12K_HW_TXRX_ETHERNET;
++  ab->dp.peer_metadata_ver = 3;
++  data = sr7420_stock32_init; len = sizeof(sr7420_stock32_init);
++ } else if (cmd_id == 0x4003 || cmd_id == 0x5008 || cmd_id == 0x4001 ||
++            cmd_id == 0x5019 || cmd_id == 0x5033 || cmd_id == 0x502d ||
++            cmd_id == 0x3a004 || cmd_id == 0x3e001 || cmd_id == 0x4021 ||
++            cmd_id == 0x4029 || cmd_id == 0x1600f || cmd_id == 0x1d017) {
++  ath12k_info(ab, "SR7420_STOCK32_SUPPRESS native_cmd=0x%x bytes=%u\n", cmd_id, skb->len);
++  dev_kfree_skb(skb);
++  return 0;
++ } else if (cmd_id == 0x48002) {
++  ret = sr7420_stock32_pdev(wmi, radio, domain); if (ret) return ret;
++  if (radio) { data = sr7420_stock32_mlo1; len = sizeof(sr7420_stock32_mlo1); }
++  else { data = sr7420_stock32_mlo0; len = sizeof(sr7420_stock32_mlo0); }
++ } else if (cmd_id == 0x48003) {
++  data = sr7420_stock32_ready0; len = sizeof(sr7420_stock32_ready0);
++ } else if (cmd_id == 0x5001) {
++  if (skb->len < 48 || get_unaligned_le32(skb->data + 8) != 1) return -EINVAL;
++  vdev = get_unaligned_le32(skb->data + 4);
++  if (vdev >= 9) return -EINVAL;
++  memcpy(mac, skb->data + 16, sizeof(mac));
++  if (radio) { data = sr7420_stock32_create1; len = sizeof(sr7420_stock32_create1); }
++  else { data = sr7420_stock32_create0; len = sizeof(sr7420_stock32_create0); }
++ } else if (cmd_id == 0x6001) {
++  if (skb->len < 24) return -EINVAL;
++  vdev = get_unaligned_le32(skb->data + 4);
++  memcpy(mac, skb->data + 8, sizeof(mac));
++  ret = sr7420_stock32_vdev(wmi, radio, domain, vdev); if (ret) return ret;
++  if (radio) { data = sr7420_stock32_peer1; len = sizeof(sr7420_stock32_peer1); }
++  else { data = sr7420_stock32_peer0; len = sizeof(sr7420_stock32_peer0); }
++ } else if (cmd_id == 0x5003) {
++  unsigned int off = 0;
++  vdev = get_unaligned_le32(skb->data + 4);
++  while (off + 4 <= skb->len) {
++   u32 h = get_unaligned_le32(skb->data + off), n = (h & 0xffff) + 4;
++   if (n < 4 || off + n > skb->len) return -EINVAL;
++   if (h >> 16 == 80 && n >= 16) {
++    freq = get_unaligned_le32(skb->data + off + 4);
++    center = get_unaligned_le32(skb->data + off + 8);
++   }
++   off += n;
++  }
++  if (freq != (radio ? 5180 : 2412) || center != (radio ? 5210 : 2412)) {
++   ath12k_warn(ab, "SR7420_STOCK32_CHANNEL_MISMATCH freq=%u center=%u\n", freq, center);
++   return -EINVAL;
++  }
++  ret = sr7420_stock32_vdev(wmi, radio, domain, vdev); if (ret) return ret;
++  if (radio) { data = sr7420_stock32_start1; len = sizeof(sr7420_stock32_start1); }
++  else { data = sr7420_stock32_start0; len = sizeof(sr7420_stock32_start0); }
++ }
++ if (data) {
++  ret = sr7420_stock32_replace(skb, data, len); if (ret) return ret;
++  if (cmd_id == 0x5001 || cmd_id == 0x6001 || cmd_id == 0x5003)
++   put_unaligned_le32(vdev, skb->data + 4);
++  if (cmd_id == 0x5001) memcpy(skb->data + 16, mac, sizeof(mac));
++  if (cmd_id == 0x6001) memcpy(skb->data + 8, mac, sizeof(mac));
++ }
++ sr7420_stock32_trace(wmi, skb, cmd_id);
++ return sr7420_stock32_send_base(wmi, skb, cmd_id);
+ }
+ 
+ static int ath12k_pull_svc_ready_ext(struct ath12k_wmi_pdev *wmi_handle,
+@@ -1161,6 +2178,22 @@
+ 		le32_encode_bits(arg->max_power, WMI_CHAN_REG_INFO2_MAX_TX_PWR);
+ }
+ 
++/* Diagnostic: captured factory 2.4 GHz beacon-rate field and presence flag. */
++static bool sr7420_start_stock_bcnrate;
++module_param_named(sr7420_start_stock_bcnrate, sr7420_start_stock_bcnrate, bool, 0600);
++
++static int sr7420_start_regdomain = -1;
++module_param_named(sr7420_start_regdomain, sr7420_start_regdomain, int, 0600);
++
++/* Diagnostic non-MLO tail encoding: 0=upstream, 1=empty arrays,
++ * 2=zero-flags MLO entry plus empty partner array. Never enable MLO here.
++ */
++static int sr7420_start_tail;
++module_param_named(sr7420_start_tail, sr7420_start_tail, int, 0600);
++
++static bool sr7420_start_fixed132;
++module_param_named(sr7420_start_fixed132, sr7420_start_fixed132, bool, 0600);
++
+ int ath12k_wmi_vdev_start(struct ath12k *ar, struct wmi_vdev_start_req_arg *arg,
+ 			  bool restart)
+ {
+@@ -1172,12 +2205,39 @@
+ 	struct ath12k_wmi_channel_params *chan;
+ 	struct wmi_tlv *tlv;
+ 	void *ptr;
+-	int ret, len, i, ml_arg_size = 0;
++	int ret, len, i, ml_arg_size = 0, non_mlo_tail_size = 0;
++	size_t cmd_len = sizeof(*cmd) + (sr7420_start_fixed132 ? 16 : 0);
++
++	struct wmi_vdev_start_req_arg sr7420_arg;
++
++	/* Diagnostic only: match the observed factory vdev DFS-domain field. */
++	if (sr7420_start_regdomain >= 0) {
++		if (sr7420_start_regdomain > 4)
++			return -EINVAL;
++		sr7420_arg = *arg;
++		sr7420_arg.regdomain = sr7420_start_regdomain;
++		arg = &sr7420_arg;
++		ath12k_info(ar->ab, "SR7420_DIAG override start regdomain %d\n",
++			    sr7420_start_regdomain);
++	}
++
++	if (sr7420_start_mode >= 0 && sr7420_start_mode < MODE_UNKNOWN) {
++		sr7420_arg = *arg;
++		sr7420_arg.mode = sr7420_start_mode;
++		arg = &sr7420_arg;
++		ath12k_info(ar->ab, "SR7420_DIAG override start mode %d\n", arg->mode);
++	}
+ 
+ 	if (WARN_ON(arg->ssid_len > sizeof(cmd->ssid.ssid)))
+ 		return -EINVAL;
+ 
+-	len = sizeof(*cmd) + sizeof(*chan) + TLV_HDR_SIZE;
++	if (sr7420_start_tail < 0 || sr7420_start_tail > 2)
++		return -EINVAL;
++	if (!restart && !arg->ml.enabled && sr7420_start_tail)
++		non_mlo_tail_size = sr7420_start_tail == 1 ?
++			2 * TLV_HDR_SIZE : 2 * TLV_HDR_SIZE + sizeof(*ml_params);
++
++	len = cmd_len + sizeof(*chan) + TLV_HDR_SIZE + non_mlo_tail_size;
+ 
+ 	if (!restart && arg->ml.enabled) {
+ 		ml_arg_size = TLV_HDR_SIZE + sizeof(*ml_params) +
+@@ -1190,8 +2250,14 @@
+ 		return -ENOMEM;
+ 
+ 	cmd = (struct wmi_vdev_start_request_cmd *)skb->data;
++	if (sr7420_start_fixed132)
++		memset(skb->data + sizeof(*cmd), 0, cmd_len - sizeof(*cmd));
++	ath12k_info(ar->ab,
++		    "SR7420_START_ABI fixed=%zu mode=%u freq=%u txss=%u rxss=%u regd=%u he=0x%x\n",
++		    cmd_len, arg->mode, arg->freq, arg->pref_tx_streams,
++		    arg->pref_rx_streams, arg->regdomain, arg->he_ops);
+ 	cmd->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_VDEV_START_REQUEST_CMD,
+-						 sizeof(*cmd));
++						 cmd_len);
+ 	cmd->vdev_id = cpu_to_le32(arg->vdev_id);
+ 	cmd->beacon_interval = cpu_to_le32(arg->bcn_intval);
+ 	cmd->bcn_tx_rate = cpu_to_le32(arg->bcn_tx_rate);
+@@ -1218,8 +2284,15 @@
+ 	}
+ 
+ 	cmd->flags |= cpu_to_le32(WMI_VDEV_START_LDPC_RX_ENABLED);
+-
+-	ptr = skb->data + sizeof(*cmd);
++	if (sr7420_start_stock_bcnrate && !restart &&
++	    arg->freq >= 2400 && arg->freq < 2500) {
++		cmd->bcn_tx_rate = cpu_to_le32(0x10000103);
++		cmd->flags |= cpu_to_le32(BIT(2));
++		ath12k_info(ar->ab, "SR7420_BCNRATE factory_2g=0x10000103 presence_bit=2\n");
++	}
++
++
++	ptr = skb->data + cmd_len;
+ 	chan = ptr;
+ 
+ 	ath12k_wmi_put_wmi_channel(chan, arg);
+@@ -1292,9 +2365,37 @@
+ 		ptr = partner_info;
+ 	}
+ 
++	if (non_mlo_tail_size) {
++		tlv = ptr;
++		tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_STRUCT,
++			sr7420_start_tail == 1 ? 0 : sizeof(*ml_params));
++		ptr += TLV_HDR_SIZE;
++		if (sr7420_start_tail == 2) {
++			ml_params = ptr;
++			ml_params->tlv_header = ath12k_wmi_tlv_cmd_hdr(
++				WMI_TAG_MLO_VDEV_START_PARAMS, sizeof(*ml_params));
++			ml_params->flags = 0;
++			ptr += sizeof(*ml_params);
++		}
++		tlv = ptr;
++		tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_STRUCT, 0);
++		ptr += TLV_HDR_SIZE;
++	}
++
++	if (WARN_ON((u8 *)ptr != skb->data + len)) {
++		dev_kfree_skb(skb);
++		return -EINVAL;
++	}
++	ath12k_info(ar->ab,
++		    "SR7420_TAIL_ABI mode=%d bytes=%d ml_enabled=%u partners=%u restart=%u\n",
++		    sr7420_start_tail, len, arg->ml.enabled,
++		    arg->ml.num_partner_links, restart);
++
+ 	ath12k_dbg(ar->ab, ATH12K_DBG_WMI, "vdev %s id 0x%x freq 0x%x mode 0x%x\n",
+ 		   restart ? "restart" : "start", arg->vdev_id,
+ 		   arg->freq, arg->mode);
++
++	sr7420_diag_hex(ar->ab, "start-command", skb->data, skb->len);
+ 
+ 	if (restart)
+ 		ret = ath12k_wmi_cmd_send(wmi, skb,
+@@ -1769,6 +2870,12 @@
+ 	ath12k_dbg(ar->ab, ATH12K_DBG_WMI,
+ 		   "WMI bss chan info req type %d\n", type);
+ 
++	if (sr7420_fw_bridge && sr7420_survey64) {
++		ath12k_info(ar->ab, "SR7420_SURVEY39_REQUEST pdev=%u type=%u bytes=%u\n",
++		            ar->pdev->pdev_id, type, skb->len);
++		if (sr7420_diag_payload)
++			sr7420_diag_hex(ar->ab, "survey39-request", skb->data, skb->len);
++	}
+ 	ret = ath12k_wmi_cmd_send(wmi, skb,
+ 				  WMI_PDEV_BSS_CHAN_INFO_REQUEST_CMDID);
+ 	if (ret) {
+@@ -4536,6 +5643,10 @@
+ 			return -ENOMEM;
+ 	}
+ 
++	ath12k_info(soc,
++		    "SR7420_MACPHY_TLV index=%u reported_len=%u struct_len=%zu total=%u\n",
++		    svc_rdy_ext->n_mac_phy_caps, len,
++		    sizeof(*svc_rdy_ext->mac_phy_caps), svc_rdy_ext->tot_phy_id);
+ 	len = min_t(u16, len, sizeof(struct ath12k_wmi_mac_phy_caps_params));
+ 	memcpy(svc_rdy_ext->mac_phy_caps + svc_rdy_ext->n_mac_phy_caps, ptr, len);
+ 	svc_rdy_ext->n_mac_phy_caps++;
+@@ -4692,7 +5803,7 @@
+ 	struct ath12k_wmi_dma_ring_caps_params *dma_caps;
+ 	struct ath12k_dbring_cap *dir_buff_caps;
+ 	int ret;
+-	u32 i;
++	u32 i, n = 0, module_id;
+ 
+ 	dma_caps_parse->n_dma_ring_caps = 0;
+ 	dma_caps = (struct ath12k_wmi_dma_ring_caps_params *)ptr;
+@@ -4718,26 +5829,27 @@
+ 
+ 	dir_buff_caps = ab->db_caps;
+ 	for (i = 0; i < dma_caps_parse->n_dma_ring_caps; i++) {
+-		if (le32_to_cpu(dma_caps[i].module_id) >= WMI_DIRECT_BUF_MAX) {
+-			ath12k_warn(ab, "Invalid module id %d\n",
+-				    le32_to_cpu(dma_caps[i].module_id));
+-			ret = -EINVAL;
+-			goto free_dir_buff;
++		module_id = le32_to_cpu(dma_caps[i].module_id);
++		if (module_id >= WMI_DIRECT_BUF_MAX) {
++			ath12k_warn(ab, "dma ring caps for module id %u not supported, skipping\n", module_id);
++			continue;
+ 		}
+ 
+-		dir_buff_caps[i].id = le32_to_cpu(dma_caps[i].module_id);
+-		dir_buff_caps[i].pdev_id =
++		dir_buff_caps[n].id = le32_to_cpu(dma_caps[i].module_id);
++		dir_buff_caps[n].pdev_id =
+ 			DP_HW2SW_MACID(le32_to_cpu(dma_caps[i].pdev_id));
+-		dir_buff_caps[i].min_elem = le32_to_cpu(dma_caps[i].min_elem);
+-		dir_buff_caps[i].min_buf_sz = le32_to_cpu(dma_caps[i].min_buf_sz);
+-		dir_buff_caps[i].min_buf_align = le32_to_cpu(dma_caps[i].min_buf_align);
+-	}
+-
++		dir_buff_caps[n].min_elem = le32_to_cpu(dma_caps[i].min_elem);
++		dir_buff_caps[n].min_buf_sz = le32_to_cpu(dma_caps[i].min_buf_sz);
++		dir_buff_caps[n].min_buf_align = le32_to_cpu(dma_caps[i].min_buf_align);
++		n++;
++	}
++
++	if (!n) {
++		ath12k_wmi_free_dbring_caps(ab);
++		return 0;
++	}
++	ab->num_db_cap = n;
+ 	return 0;
+-
+-free_dir_buff:
+-	ath12k_wmi_free_dbring_caps(ab);
+-	return ret;
+ }
+ 
+ static void
+@@ -4848,6 +5960,11 @@
+ 				return ret;
+ 			}
+ 
++			ath12k_info(ab,
++				    "SR7420_MACPHY_COUNTS hw_modes=%u total=%u tlvs=%u capacity=%zu\n",
++				    svc_ext_info->num_hw_modes, svc_rdy_ext->tot_phy_id,
++				    svc_rdy_ext->n_mac_phy_caps,
++				    ARRAY_SIZE(svc_ext_info->mac_phy_info));
+ 			if (svc_rdy_ext->tot_phy_id >
+ 			    ARRAY_SIZE(svc_ext_info->mac_phy_info)) {
+ 				ath12k_warn(ab, "too many PHY entries %u (max %zu)\n",
+@@ -7506,6 +8623,12 @@
+ 	u32 cc_freq_hz = ab->cc_freq_hz;
+ 	u64 busy, total, tx, rx, rx_bss;
+ 	int idx;
++
++	if (sr7420_fw_bridge && sr7420_survey64) {
++		ath12k_info(ab, "SR7420_SURVEY39_EVENT bytes=%u\n", skb->len);
++		if (sr7420_diag_payload)
++			sr7420_diag_hex(ab, "survey39-event", skb->data, skb->len);
++	}
+ 
+ 	if (ath12k_pull_pdev_bss_chan_info_ev(ab, skb, &bss_ch_info_ev) != 0) {
+ 		ath12k_warn(ab, "failed to extract pdev bss chan info event");
+@@ -9757,6 +10880,13 @@
+ 
+ 	cmd_hdr = (struct wmi_cmd_hdr *)skb->data;
+ 	id = le32_get_bits(cmd_hdr->cmd_id, WMI_CMD_HDR_CMD_ID);
++	ath12k_dbg(ab, ATH12K_DBG_WMI, "SR7420_DIAG rx event=0x%x len=%u\n", id, skb->len);
++	if (id == WMI_VDEV_START_RESP_EVENTID)
++		sr7420_diag_hex(ab, "start-response", skb->data, skb->len);
++	if (id == WMI_PDEV_GET_HALPHY_CAL_STATUS_EVENTID)
++		sr7420_diag_hex(ab, "halphy-cal-status", skb->data, skb->len);
++	if (sr7420_diag_payload && id == WMI_DIAG_EVENTID)
++		sr7420_diag_hex(ab, "fw-diag", skb->data, skb->len);
+ 
+ 	if (!skb_pull(skb, sizeof(struct wmi_cmd_hdr)))
+ 		goto out;
+@@ -10787,11 +11917,23 @@
+ 	return ath12k_wmi_cmd_send(wmi, skb, WMI_STA_KEEPALIVE_CMDID);
+ }
+ 
++/* Factory SR7420 MLO SETUP uses a 16-byte fixed TLV, including max peers.
++ * The original send function and pinned vendor schema independently agree.
++ * The diagnostic requests the minimum per-chip peer capacity advertised by
++ * this host; the exact original live peer count has not yet been captured.
++ */
++static bool sr7420_mlo_setup_fixed16;
++module_param_named(sr7420_mlo_setup_fixed16, sr7420_mlo_setup_fixed16, bool, 0444);
++static unsigned int sr7420_mlo_peer_limit;
++module_param_named(sr7420_mlo_peer_limit, sr7420_mlo_peer_limit, uint, 0444);
++MODULE_PARM_DESC(sr7420_mlo_peer_limit, "Diagnostic MLO peer capacity override, zero keeps host default");
++
+ int ath12k_wmi_mlo_setup(struct ath12k *ar, struct wmi_mlo_setup_arg *mlo_params)
+ {
+ 	struct wmi_mlo_setup_cmd *cmd;
+ 	struct ath12k_wmi_pdev *wmi = ar->wmi;
+-	u32 *partner_links, num_links;
++	u32 *partner_links, num_links, max_ml_peers;
++	u32 cmd_len = sizeof(*cmd);
+ 	int i, ret, buf_len, arg_len;
+ 	struct sk_buff *skb;
+ 	struct wmi_tlv *tlv;
+@@ -10799,7 +11941,9 @@
+ 
+ 	num_links = mlo_params->num_partner_links;
+ 	arg_len = num_links * sizeof(u32);
+-	buf_len = sizeof(*cmd) + TLV_HDR_SIZE + arg_len;
++	if (sr7420_mlo_setup_fixed16)
++                cmd_len += sizeof(__le32);
++        buf_len = cmd_len + TLV_HDR_SIZE + arg_len;
+ 
+ 	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, buf_len);
+ 	if (!skb)
+@@ -10807,10 +11951,23 @@
+ 
+ 	cmd = (struct wmi_mlo_setup_cmd *)skb->data;
+ 	cmd->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_MLO_SETUP_CMD,
+-						 sizeof(*cmd));
++						 cmd_len);
+ 	cmd->mld_group_id = mlo_params->group_id;
+ 	cmd->pdev_id = cpu_to_le32(ar->pdev->pdev_id);
+-	ptr = skb->data + sizeof(*cmd);
++	if (sr7420_mlo_setup_fixed16) {
++                max_ml_peers = ar->ab->hw_params->max_mlo_peer;
++                for (i = 0; i < ar->ab->ag->num_devices; i++)
++                        if (ar->ab->ag->ab[i])
++                                max_ml_peers = min(max_ml_peers,
++                                        (u32)ar->ab->ag->ab[i]->hw_params->max_mlo_peer);
++                if (sr7420_mlo_peer_limit)
++                        max_ml_peers = min(max_ml_peers, sr7420_mlo_peer_limit);
++                *(__le32 *)(skb->data + sizeof(*cmd)) = cpu_to_le32(max_ml_peers);
++                ath12k_info(ar->ab,
++                            "SR7420_MLO_SETUP fixed=%u max_ml_peers=%u partners=%u\n",
++                            cmd_len, max_ml_peers, num_links);
++        }
++        ptr = skb->data + cmd_len;
+ 
+ 	tlv = ptr;
+ 	tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_UINT32, arg_len);
+@@ -10820,7 +11977,8 @@
+ 	for (i = 0; i < num_links; i++)
+ 		partner_links[i] = mlo_params->partner_link_id[i];
+ 
+-	ret = ath12k_wmi_cmd_send(wmi, skb, WMI_MLO_SETUP_CMDID);
++	sr7420_diag_hex(ar->ab, "mlo-setup-command", skb->data, skb->len);
++        ret = ath12k_wmi_cmd_send(wmi, skb, WMI_MLO_SETUP_CMDID);
+ 	if (ret) {
+ 		ath12k_warn(ar->ab, "failed to submit WMI_MLO_SETUP_CMDID command: %d\n",
+ 			    ret);

@@ -1,0 +1,565 @@
+Subject: [PATCH] net: zte: preview SR7420 warm LAN-only handover and RX diagnostics
+
+Validated on SR7420 using native Linux 6.18.60 initramfs via kexec,
+with inherited RTL8372N initialization. This patch does not enable any
+board DTS, establish cold reset, or provide a flashable image.
+
+Add the optional zte,lan-only path, optional SR7420 warm-switch path,
+software RX diagnostics, and narrowly matched inherited VLAN row adoption.
+The paired modules must be rebuilt together because their shared ABI changes.
+
+Apply after this workspace's Linux 6.18 series (baseline recorded in the
+source manifest). Do not replace the in-tree Makefile with the external one.
+
+--- a/drivers/net/ethernet/zte/zx279133-idm.c
++++ b/drivers/net/ethernet/zte/zx279133-idm.c
+@@ -796,6 +796,7 @@
+ 				len += zx279133_idm_rx_restore_lan_l2(
+ 					skb, le32_to_cpu(READ_ONCE(desc->metadata[0])));
+ 			if (lan_source && !lan_dsa_active) {
++				u64_stats_inc(&stats->rx_pre_dsa_drops);
+ 				if (eth->lan_ndev)
+ 					zx279133_stats_rx_dropped(eth, eth->lan_ndev);
+ 				dev_kfree_skb_any(skb);
+--- a/drivers/net/ethernet/zte/zx279133-lan-conduit.c
++++ b/drivers/net/ethernet/zte/zx279133-lan-conduit.c
+@@ -136,7 +136,35 @@
+ 	return 0;
+ }
+ 
++static const char zx279133_lan_diag_names[][ETH_GSTRING_LEN] = {
++#define ZX279133_LAN_RX_DIAG_NAME(name) #name,
++ ZX279133_LAN_RX_DIAG_FIELDS(ZX279133_LAN_RX_DIAG_NAME)
++#undef ZX279133_LAN_RX_DIAG_NAME
++};
++
++static int zx279133_lan_diag_count(struct net_device *ndev, int sset)
++{
++ return sset == ETH_SS_STATS ? ZX279133_LAN_DIAG_COUNT : -EOPNOTSUPP;
++}
++
++static void zx279133_lan_diag_strings(struct net_device *ndev, u32 sset, u8 *data)
++{
++ if (sset == ETH_SS_STATS)
++  memcpy(data, zx279133_lan_diag_names, sizeof(zx279133_lan_diag_names));
++}
++
++static void zx279133_lan_diag_stats(struct net_device *ndev,
++                                   struct ethtool_stats *stats, u64 *data)
++{
++ struct zx279133_lan_conduit_priv *priv = netdev_priv(ndev);
++
++ priv->service->ops->get_rx_diagnostics(priv->service, data);
++}
++
+ static const struct ethtool_ops zx279133_lan_conduit_ethtool_ops = {
++	.get_sset_count = zx279133_lan_diag_count,
++	.get_strings = zx279133_lan_diag_strings,
++	.get_ethtool_stats = zx279133_lan_diag_stats,
+ 	.get_rxnfc = zx279133_lan_conduit_get_rxnfc,
+ 	.get_rxfh_indir_size = zx279133_lan_conduit_get_rxfh_indir_size,
+ 	.get_rxfh = zx279133_lan_conduit_get_rxfh,
+--- a/drivers/net/ethernet/zte/zx279133-lan.h
++++ b/drivers/net/ethernet/zte/zx279133-lan.h
+@@ -28,7 +28,28 @@
+ 	struct zx279133_netdev_stats stats;
+ };
+ 
++#define ZX279133_LAN_RX_DIAG_FIELDS(_) \
++	_(rx_napi_polls) \
++	_(rx_napi_work) \
++	_(rx_invalid_dma) \
++	_(rx_page_lookup_misses) \
++	_(rx_jumbo_drops) \
++	_(rx_descriptor_flag_drops) \
++	_(rx_page_alloc_failures) \
++	_(rx_skb_alloc_failures) \
++	_(rx_refill_post_failures) \
++	_(rx_refill_shortfalls) \
++	_(rx_pre_dsa_drops)
++
++enum zx279133_lan_rx_diag_index {
++#define ZX279133_LAN_RX_DIAG_ENUM(name) ZX279133_LAN_DIAG_##name,
++	ZX279133_LAN_RX_DIAG_FIELDS(ZX279133_LAN_RX_DIAG_ENUM)
++#undef ZX279133_LAN_RX_DIAG_ENUM
++	ZX279133_LAN_DIAG_COUNT
++};
++
+ struct zx279133_lan_service_ops {
++	void (*get_rx_diagnostics)(struct zx279133_lan_service *service, u64 *data);
+ 	int (*get_rxfh)(struct zx279133_lan_service *service,
+ 			struct ethtool_rxfh_param *rxfh);
+ 	int (*set_rxfh)(struct zx279133_lan_service *service,
+@@ -79,7 +100,8 @@
+ static inline bool
+ zx279133_lan_service_valid(const struct zx279133_lan_service *service)
+ {
+-	return service && service->ops && service->ops->nppt_read &&
++	return service && service->ops && service->ops->get_rx_diagnostics &&
++	       service->ops->nppt_read &&
+ 	       service->ops->nppt_write && service->ops->xmac_lock &&
+ 	       service->ops->xmac_unlock && service->ops->datapath_get &&
+ 	       service->ops->datapath_set_ready &&
+--- a/drivers/net/ethernet/zte/zx279133-main.c
++++ b/drivers/net/ethernet/zte/zx279133-main.c
+@@ -29,6 +29,7 @@
+ #include <linux/phylink.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
+ #include <linux/tcp.h>
+ #include <linux/rtnetlink.h>
+@@ -179,32 +180,37 @@
+ 		goto err_route_off;
+ 	/* Admit configured VLANs before reopening the packet path. */
+ 	zx279133_route_set(eth, true);
+-	zx279133_xmac_set_enabled(eth, false);
+-
+-	/* A failed stop may leave the generic PHY power reference held. Retry
+-	 * the power-off before programming a new mode so the provider callback
+-	 * cannot be skipped by the following power-on.
+-	 */
+-	if (eth->serdes_powered) {
+-		ret = phy_power_off(eth->serdes);
++	if (!eth->lan_only)
++		zx279133_xmac_set_enabled(eth, false);
++
++	if (!eth->lan_only) {
++		/* A failed stop may leave the generic PHY power reference held. Retry
++		 * the power-off before programming a new mode so the provider callback
++		 * cannot be skipped by the following power-on.
++		 */
++		if (eth->serdes_powered) {
++			ret = phy_power_off(eth->serdes);
++			if (ret)
++				goto err_route_off;
++			eth->serdes_powered = false;
++		}
++
++		ret = phy_set_mode_ext(eth->serdes, PHY_MODE_ETHERNET,
++				       eth->host_interface);
+ 		if (ret)
+ 			goto err_route_off;
+-		eth->serdes_powered = false;
+-	}
+-
+-	ret = phy_set_mode_ext(eth->serdes, PHY_MODE_ETHERNET,
+-			       eth->host_interface);
+-	if (ret)
+-		goto err_route_off;
+-
+-	ret = phy_power_on(eth->serdes);
+-	if (ret)
+-		goto err_route_off;
+-	eth->serdes_powered = true;
+-	eth->serdes_interface = eth->host_interface;
+-	usleep_range(2000, 2500);
++
++		ret = phy_power_on(eth->serdes);
++		if (ret)
++			goto err_route_off;
++		eth->serdes_powered = true;
++		eth->serdes_interface = eth->host_interface;
++		usleep_range(2000, 2500);
++	}
++
+ 	eth->hardware_prepared = true;
+-	zx279133_xmac_stats_start(eth);
++	if (!eth->lan_only)
++		zx279133_xmac_stats_start(eth);
+ 	zx279133_ptp_start(eth);
+ 
+ 	return 0;
+@@ -231,17 +237,20 @@
+ 
+ 	zx279133_xmac_stats_stop(eth);
+ 	zx279133_ptp_stop(eth);
+-	zx279133_xmac_set_enabled(eth, false);
++	if (!eth->lan_only)
++		zx279133_xmac_set_enabled(eth, false);
+ 	zx279133_flow_offload_flush(eth);
+ 	zx279133_qos_stop(eth);
+ 	if (eth->xpcs_runtime_held)
+ 		zx279133_xpcs_set_bypass(eth, false);
+-	ret = phy_power_off(eth->serdes);
+-	if (ret) {
+-		dev_err(eth->dev, "failed to power off SerDes: %d\n", ret);
+-	} else {
+-		eth->serdes_powered = false;
+-		eth->serdes_interface = PHY_INTERFACE_MODE_NA;
++	if (!eth->lan_only) {
++		ret = phy_power_off(eth->serdes);
++		if (ret) {
++			dev_err(eth->dev, "failed to power off SerDes: %d\n", ret);
++		} else {
++			eth->serdes_powered = false;
++			eth->serdes_interface = PHY_INTERFACE_MODE_NA;
++		}
+ 	}
+ 	zx279133_route_set(eth, false);
+ 	zx279133_np_restore(eth);
+@@ -293,6 +302,7 @@
+ 	eth = netdev_priv(ndev);
+ 	eth->dev = dev;
+ 	eth->ndev = ndev;
++	eth->lan_only = device_property_read_bool(dev, "zte,lan-only");
+ 	dev_info(dev, "NPU probe: begin\n");
+ 	ndev->tstats = devm_netdev_alloc_pcpu_stats(dev,
+ 						    struct pcpu_sw_netstats);
+@@ -485,85 +495,90 @@
+ 					     zx279133_irq_names[i]);
+ 	}
+ 
+-	eth->serdes = devm_phy_get(dev, "serdes");
+-	if (IS_ERR(eth->serdes))
+-		return dev_err_probe(dev, PTR_ERR(eth->serdes),
+-				     "failed to get SerDes PHY\n");
+-
+-	pcs_np = of_parse_phandle(dev->of_node, "pcs-handle", 0);
+-	if (!pcs_np)
+-		return dev_err_probe(dev, -ENODEV, "PCS phandle is missing\n");
+-
+-	eth->xpcs_mdiodev = fwnode_mdio_find_device(of_fwnode_handle(pcs_np));
+-	if (!eth->xpcs_mdiodev) {
++	if (!eth->lan_only) {
++		eth->serdes = devm_phy_get(dev, "serdes");
++		if (IS_ERR(eth->serdes))
++			return dev_err_probe(dev, PTR_ERR(eth->serdes),
++					     "failed to get SerDes PHY\n");
++
++		pcs_np = of_parse_phandle(dev->of_node, "pcs-handle", 0);
++		if (!pcs_np)
++			return dev_err_probe(dev, -ENODEV, "PCS phandle is missing\n");
++
++		eth->xpcs_mdiodev = fwnode_mdio_find_device(of_fwnode_handle(pcs_np));
++		if (!eth->xpcs_mdiodev) {
++			of_node_put(pcs_np);
++			return dev_err_probe(dev, -EPROBE_DEFER,
++					     "XPCS MDIO device is unavailable\n");
++		}
++
++		ret = devm_add_action_or_reset(dev, zx279133_mdio_device_put,
++					       eth->xpcs_mdiodev);
++		if (ret) {
++			of_node_put(pcs_np);
++			return ret;
++		}
++
++		eth->xpcs = xpcs_create_fwnode(of_fwnode_handle(pcs_np));
+ 		of_node_put(pcs_np);
+-		return dev_err_probe(dev, -EPROBE_DEFER,
+-				     "XPCS MDIO device is unavailable\n");
+-	}
+-
+-	ret = devm_add_action_or_reset(dev, zx279133_mdio_device_put,
+-				       eth->xpcs_mdiodev);
+-	if (ret) {
+-		of_node_put(pcs_np);
+-		return ret;
+-	}
+-
+-	eth->xpcs = xpcs_create_fwnode(of_fwnode_handle(pcs_np));
+-	of_node_put(pcs_np);
+-	if (IS_ERR(eth->xpcs))
+-		return dev_err_probe(dev, PTR_ERR(eth->xpcs),
+-				     "failed to create XPCS handle\n");
+-
+-	ret = devm_add_action_or_reset(dev, zx279133_xpcs_destroy, eth->xpcs);
+-	if (ret)
+-		return ret;
+-
+-	ret = device_get_phy_mode(dev);
+-	if (ret < 0)
+-		return dev_err_probe(dev, ret,
+-				     "failed to get initial PHY interface mode\n");
+-	eth->host_interface = ret;
+-
+-	eth->phylink_config.dev = &ndev->dev;
+-	eth->phylink_config.type = PHYLINK_NETDEV;
+-	/*
+-	 * The factory XMAC1 path leaves 802.3x pause disabled. Advertising it
+-	 * enables RX_FLOW, which throttles WAN transmit under forwarding load.
+-	 */
+-	eth->phylink_config.mac_capabilities =
+-		MAC_2500FD | MAC_1000FD |
+-		MAC_100 | MAC_10;
+-	__set_bit(PHY_INTERFACE_MODE_2500BASEX,
+-		  eth->phylink_config.supported_interfaces);
+-	__set_bit(PHY_INTERFACE_MODE_SGMII,
+-		  eth->phylink_config.supported_interfaces);
+-	__set_bit(PHY_INTERFACE_MODE_2500BASEX,
+-		  eth->phylink_config.lpi_interfaces);
+-	__set_bit(PHY_INTERFACE_MODE_SGMII,
+-		  eth->phylink_config.lpi_interfaces);
+-	eth->phylink_config.lpi_capabilities =
+-		MAC_2500FD | MAC_1000FD | MAC_100FD;
+-	eth->phylink_config.lpi_timer_default = 1000;
+-	xpcs_config_eee_mult_fact(eth->xpcs, 1);
+-
+-	eth->phylink = phylink_create(&eth->phylink_config, dev_fwnode(dev),
+-				      eth->host_interface,
+-				      &zx279133_phylink_ops);
+-	if (IS_ERR(eth->phylink))
+-		return dev_err_probe(dev, PTR_ERR(eth->phylink),
+-				     "failed to create phylink\n");
+-
+-	ret = devm_add_action_or_reset(dev, zx279133_phylink_destroy,
+-				       eth->phylink);
+-	if (ret)
+-		return ret;
++		if (IS_ERR(eth->xpcs))
++			return dev_err_probe(dev, PTR_ERR(eth->xpcs),
++					     "failed to create XPCS handle\n");
++
++		ret = devm_add_action_or_reset(dev, zx279133_xpcs_destroy, eth->xpcs);
++		if (ret)
++			return ret;
++
++		ret = device_get_phy_mode(dev);
++		if (ret < 0)
++			return dev_err_probe(dev, ret,
++					     "failed to get initial PHY interface mode\n");
++		eth->host_interface = ret;
++
++		eth->phylink_config.dev = &ndev->dev;
++		eth->phylink_config.type = PHYLINK_NETDEV;
++		/*
++		 * The factory XMAC1 path leaves 802.3x pause disabled. Advertising it
++		 * enables RX_FLOW, which throttles WAN transmit under forwarding load.
++		 */
++		eth->phylink_config.mac_capabilities =
++			MAC_2500FD | MAC_1000FD |
++			MAC_100 | MAC_10;
++		__set_bit(PHY_INTERFACE_MODE_2500BASEX,
++			  eth->phylink_config.supported_interfaces);
++		__set_bit(PHY_INTERFACE_MODE_SGMII,
++			  eth->phylink_config.supported_interfaces);
++		__set_bit(PHY_INTERFACE_MODE_2500BASEX,
++			  eth->phylink_config.lpi_interfaces);
++		__set_bit(PHY_INTERFACE_MODE_SGMII,
++			  eth->phylink_config.lpi_interfaces);
++		eth->phylink_config.lpi_capabilities =
++			MAC_2500FD | MAC_1000FD | MAC_100FD;
++		eth->phylink_config.lpi_timer_default = 1000;
++		xpcs_config_eee_mult_fact(eth->xpcs, 1);
++
++		eth->phylink = phylink_create(&eth->phylink_config, dev_fwnode(dev),
++					      eth->host_interface,
++					      &zx279133_phylink_ops);
++		if (IS_ERR(eth->phylink))
++			return dev_err_probe(dev, PTR_ERR(eth->phylink),
++					     "failed to create phylink\n");
++
++		ret = devm_add_action_or_reset(dev, zx279133_phylink_destroy,
++					       eth->phylink);
++		if (ret)
++			return ret;
++	}
++
+ 	ret = zx279133_flow_offload_init(eth);
+ 	if (ret)
+ 		return ret;
+ 	dev_info(dev, "NPU probe: shared NP resource manager ready\n");
+-	ret = zx279133_wanid_debugfs_init(eth);
+-	if (ret)
+-		return ret;
++	if (!eth->lan_only) {
++		ret = zx279133_wanid_debugfs_init(eth);
++		if (ret)
++			return ret;
++	}
+ 	ret = zx279133_ptp_init(eth);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to register PHC\n");
+@@ -717,10 +732,12 @@
+ 				       eth);
+ 	if (ret)
+ 		return ret;
+-	ret = devm_register_netdev(dev, ndev);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to register netdev\n");
+-	dev_info(dev, "NPU probe: WAN netdev registered\n");
++	if (!eth->lan_only) {
++		ret = devm_register_netdev(dev, ndev);
++		if (ret)
++			return dev_err_probe(dev, ret, "failed to register netdev\n");
++		dev_info(dev, "NPU probe: WAN netdev registered\n");
++	}
+ 
+ 	eth->lan_service.ops = &zx279133_lan_service_ops;
+ 	platform_set_drvdata(pdev, &eth->lan_service);
+@@ -732,7 +749,8 @@
+ 
+ 	/* An active child datapath owns its own independent clock reference. */
+ 	devm_release_action(dev, zx279133_probe_clocks_disable, eth);
+-	dev_info(dev, "WAN netdev and LAN child devices registered\n");
++	dev_info(dev, "%s and LAN child devices registered\n",
++		 eth->lan_only ? "LAN-only shared datapath" : "WAN netdev");
+ 
+ 	return 0;
+ }
+--- a/drivers/net/ethernet/zte/zx279133-netdev.c
++++ b/drivers/net/ethernet/zte/zx279133-netdev.c
+@@ -245,16 +245,18 @@
+ 		mutex_lock(&eth->xmac_lock);
+ 		zx279133_xmac_close(eth, ZX279133_XMAC0_BASE,
+ 				    ZX279133_XMAC_RX_CTRL);
+-		zx279133_xmac_close(eth, ZX279133_XMAC1_BASE,
+-				    ZX279133_XMAC_RX_CTRL);
++		if (!eth->lan_only)
++			zx279133_xmac_close(eth, ZX279133_XMAC1_BASE,
++					    ZX279133_XMAC_RX_CTRL);
+ 		mutex_unlock(&eth->xmac_lock);
+ 		zx279133_shared_rx_stop(eth);
+ 		zx279133_shared_tx_pause(eth);
+ 		mutex_lock(&eth->xmac_lock);
+ 		zx279133_xmac_close(eth, ZX279133_XMAC0_BASE,
+ 				    ZX279133_XMAC_TX_CTRL);
+-		zx279133_xmac_close(eth, ZX279133_XMAC1_BASE,
+-				    ZX279133_XMAC_TX_CTRL);
++		if (!eth->lan_only)
++			zx279133_xmac_close(eth, ZX279133_XMAC1_BASE,
++					    ZX279133_XMAC_TX_CTRL);
+ 		mutex_unlock(&eth->xmac_lock);
+ 		zx279133_route_set(eth, false);
+ 		zx279133_idm_tx_deactivate(eth);
+@@ -1949,10 +1951,12 @@
+ 		if (ret)
+ 			goto out_unlock;
+ 
+-		ret = pm_runtime_resume_and_get(eth->xpcs_mdiodev->bus->parent);
+-		if (ret < 0)
+-			goto err_hardware_unprepare;
+-		eth->xpcs_runtime_held = true;
++		if (!eth->lan_only) {
++			ret = pm_runtime_resume_and_get(eth->xpcs_mdiodev->bus->parent);
++			if (ret < 0)
++				goto err_hardware_unprepare;
++			eth->xpcs_runtime_held = true;
++		}
+ 
+ 		ret = zx279133_shared_idm_prepare(eth);
+ 		if (ret)
+@@ -2126,7 +2130,32 @@
+ 	return zx279133_vlan_config_sync(zx279133_lan_service_to_eth(service), vids);
+ }
+ 
++/* Software-only diagnostics also work when the WAN XMAC is disabled. */
++static void
++zx279133_lan_get_rx_diagnostics(struct zx279133_lan_service *service, u64 *data)
++{
++ struct zx279133_eth *eth = zx279133_lan_service_to_eth(service);
++ unsigned int group, start, i;
++
++ memset(data, 0, sizeof(u64) * ZX279133_LAN_DIAG_COUNT);
++ for (group = 0; group < 2; group++) {
++  struct zx279133_rx_stats *stats = &eth->rx_stats[group];
++  u64 sample[ZX279133_LAN_DIAG_COUNT];
++
++  do {
++   start = u64_stats_fetch_begin(&stats->syncp);
++#define ZX279133_LAN_RX_DIAG_READ(name) \
++   sample[ZX279133_LAN_DIAG_##name] = u64_stats_read(&stats->name);
++   ZX279133_LAN_RX_DIAG_FIELDS(ZX279133_LAN_RX_DIAG_READ)
++#undef ZX279133_LAN_RX_DIAG_READ
++  } while (u64_stats_fetch_retry(&stats->syncp, start));
++  for (i = 0; i < ZX279133_LAN_DIAG_COUNT; i++)
++   data[i] += sample[i];
++ }
++}
++
+ const struct zx279133_lan_service_ops zx279133_lan_service_ops = {
++	.get_rx_diagnostics = zx279133_lan_get_rx_diagnostics,
+ 	.get_rxfh = zx279133_lan_get_rxfh,
+ 	.set_rxfh = zx279133_lan_set_rxfh,
+ 	.get_rxfh_fields = zx279133_lan_get_rxfh_fields,
+--- a/drivers/net/ethernet/zte/zx279133-offload-api.c
++++ b/drivers/net/ethernet/zte/zx279133-offload-api.c
+@@ -1084,7 +1084,17 @@
+ 			}
+ 			c->after = np->vlan_originals[vid];
+ 		} else {
+-			if (memchr_inv(&c->before, 0, sizeof(c->before))) {
++			/* A warm LAN-only handover may inherit the exact verified
++			 * admission row. Preserve it as the rollback original; do
++			 * not adopt any different pre-existing hardware state.
++			 */
++			if (memchr_inv(&c->before, 0, sizeof(c->before)) &&
++			    (!eth->lan_only || memcmp(&c->before,
++						 &zx279133_vlan_board, sizeof(c->before)))) {
++				dev_warn(eth->dev,
++					 "VLAN admission VID %lu busy: %08x %08x %08x %08x\n",
++					 vid, c->before.words[0], c->before.words[1],
++					 c->before.words[2], c->before.words[3]);
+ 				ret = -EBUSY;
+ 				goto resync;
+ 			}
+--- a/drivers/net/ethernet/zte/zx279133-rtl8372n.c
++++ b/drivers/net/ethernet/zte/zx279133-rtl8372n.c
+@@ -28,6 +28,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/ptp_clock_kernel.h>
++#include <linux/property.h>
+ #include <linux/slab.h>
+ #include <linux/tc_act/tc_csum.h>
+ #include <linux/workqueue.h>
+@@ -8170,15 +8171,29 @@
+ 		goto err_parent_datapath_put;
+ 	}
+ 
+-	priv->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+-	if (IS_ERR(priv->reset_gpio)) {
+-		ret = dev_err_probe(dev, PTR_ERR(priv->reset_gpio),
+-				    "failed to acquire RTL8372N reset GPIO\n");
+-		priv->reset_gpio = NULL;
+-		goto err_switch_put;
+-	}
+-	priv->switch_reset_asserted = true;
+-	rtl8372n_hw_reset(dev, priv);
++	/* RAM-only SR7420 diagnostic: inherited switch state, no guessed GPIO. */
++	if (device_property_read_bool(dev, "zte,sr7420-warm-switch")) {
++		u32 chip_id;
++
++		mutex_lock(&priv->switch_mdiodev->bus->mdio_lock);
++		ret = rtl8372n_read_reg(priv->switch_mdiodev, RTL8372N_CHIP_ID, &chip_id);
++		mutex_unlock(&priv->switch_mdiodev->bus->mdio_lock);
++		if (ret || (chip_id >> 8) != 0x837270) {
++			ret = ret ?: -ENODEV;
++			goto err_switch_put;
++		}
++		dev_info(dev, "SR7420 RAM warm handover, chip %#x, no reset GPIO\n", chip_id);
++	} else {
++		priv->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++		if (IS_ERR(priv->reset_gpio)) {
++			ret = dev_err_probe(dev, PTR_ERR(priv->reset_gpio),
++					    "failed to acquire RTL8372N reset GPIO\n");
++			priv->reset_gpio = NULL;
++			goto err_switch_put;
++		}
++		priv->switch_reset_asserted = true;
++		rtl8372n_hw_reset(dev, priv);
++	}
+ 
+ 	priv->serdes = devm_of_phy_get(dev, parent_np, "lan-serdes");
+ 	if (IS_ERR(priv->serdes)) {
+--- a/drivers/net/ethernet/zte/zx279133.h
++++ b/drivers/net/ethernet/zte/zx279133.h
+@@ -570,6 +570,7 @@
+ 	u64_stats_t rx_page_lookup_misses;
+ 	u64_stats_t rx_jumbo_drops;
+ 	u64_stats_t rx_descriptor_flag_drops;
++	u64_stats_t rx_pre_dsa_drops;
+ 	u64_stats_t rx_page_alloc_failures;
+ 	u64_stats_t rx_copy_fallbacks;
+ 	u64_stats_t rx_skb_alloc_failures;
+@@ -620,6 +621,8 @@
+ 	struct device *dev;
+ 	struct net_device *ndev;
+ 	struct net_device *lan_ndev;
++	/* Shared LAN datapath without an XMAC1 WAN PHY. Default remains false. */
++	bool lan_only;
+ 	/*
+ 	 * LAN ports switched to WAN-type in the PPU, one bit per transport VID
+ 	 * from ZX279133_LAN_TRANSPORT_VID_MIN; written under datapath_lock.

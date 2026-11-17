@@ -1,0 +1,16 @@
+if TARGET_zte
+
+config KERNEL_DEVTMPFS
+	default y
+
+config KERNEL_DEVTMPFS_MOUNT
+	default y
+
+config KERNEL_ZTE_ZX279133_NATIVE_DEBUG
+	bool "ZX279133 native NPU diagnostics"
+	depends on TARGET_zte_zx279133 && KERNEL_DEBUG_FS
+	default y if PACKAGE_npu-debug
+	help
+	  Enable the native debugfs backend for the npu-debug tools.
+
+endif
