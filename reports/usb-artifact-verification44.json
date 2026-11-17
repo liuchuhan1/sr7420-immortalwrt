@@ -1,0 +1,33 @@
+{
+  "passed": true,
+  "scope": "offline artifact checks; no router boot or network test",
+  "kernel_release": "6.18.60",
+  "kernel_abi_hash": "b608e4c72ecf314fc3955d48ca497c9f",
+  "manifest_entries_checked": {
+    "payload": 34,
+    "boot": 5,
+    "launcher": 22,
+    "root": 426
+  },
+  "bootstrap_modules_checked": 16,
+  "bootstrap_embedded_in_image": true,
+  "bootstrap_offset": 11415728,
+  "default_password_verified": true,
+  "accounts": {
+    "public_accounts": [
+      "daemon",
+      "ftp",
+      "network",
+      "nobody",
+      "root"
+    ],
+    "non_login_service_accounts": [
+      "dnsmasq",
+      "logd",
+      "ntp",
+      "ubus"
+    ]
+  },
+  "device_calibration_included": false,
+  "hardware_verified": false
+}

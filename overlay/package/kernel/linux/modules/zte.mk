@@ -5,7 +5,7 @@ PKG_CONFIG_DEPENDS += CONFIG_ZTE_NPU_VLAN_OFFLOAD
 define KernelPackage/zte-npu
   SUBMENU:=Network Devices
   TITLE:=ZTE ZX279133 NPPT Ethernet data plane
-  DEPENDS:=@TARGET_zte
+  DEPENDS:=@TARGET_zte +kmod-dsa +kmod-ptp
   KCONFIG:=CONFIG_ZTE_ZX279133_ETH \
 	CONFIG_ZTE_ZX279133_LAN_CONDUIT \
 	CONFIG_ZTE_ZX279133_NATIVE_DEBUG=y
@@ -57,9 +57,10 @@ $(eval $(call KernelPackage,zte-fnoffload))
 define KernelPackage/zte-rtl8372n
   SUBMENU:=Network Devices
   TITLE:=ZTE ZX279133 RTL8372N DSA switch
-  DEPENDS:=@TARGET_zte +kmod-zte-npu
-  KCONFIG:=CONFIG_ZTE_ZX279133_RTL8372N
-  FILES:=$(LINUX_DIR)/drivers/net/ethernet/zte/zx279133-rtl8372n.ko
+  DEPENDS:=@TARGET_zte +kmod-zte-npu +kmod-dsa
+  KCONFIG:=CONFIG_ZTE_ZX279133_RTL8372N CONFIG_NET_DSA_TAG_ZX279133_RTL8372N
+  FILES:=$(LINUX_DIR)/drivers/net/ethernet/zte/zx279133-rtl8372n.ko \
+	$(LINUX_DIR)/net/dsa/tag_zx279133_rtl8372n.ko
   AUTOLOAD:=$(call AutoLoad,35,zx279133-rtl8372n,1)
 endef
 
@@ -84,3 +85,24 @@ define KernelPackage/leds-sr7420-ledboard
   AUTOLOAD:=$(call AutoProbe,leds-sr7420-ledboard)
 endef
 $(eval $(call KernelPackage,leds-sr7420-ledboard))
+
+# Generic DWC3 glue is separate in Linux 6.18 and must survive USB-root handoff.
+define KernelPackage/zte-dwc3-platform
+  SUBMENU:=USB Support
+  TITLE:=ZX279133 generic DWC3 platform glue
+  DEPENDS:=@TARGET_zte +kmod-usb-dwc3
+  KCONFIG:=CONFIG_USB_DWC3_GENERIC_PLAT
+  FILES:=$(LINUX_DIR)/drivers/usb/dwc3/dwc3-generic-plat.ko
+  AUTOLOAD:=$(call AutoProbe,dwc3-generic-plat)
+endef
+$(eval $(call KernelPackage,zte-dwc3-platform))
+
+define KernelPackage/zte-pvt
+  SUBMENU:=Hardware Monitoring Support
+  TITLE:=ZX279133 process voltage temperature monitor
+  DEPENDS:=@TARGET_zte +kmod-hwmon-core
+  KCONFIG:=CONFIG_SENSORS_ZX279133_PVT
+  FILES:=$(LINUX_DIR)/drivers/hwmon/zx279133-pvt.ko
+  AUTOLOAD:=$(call AutoProbe,zx279133-pvt)
+endef
+$(eval $(call KernelPackage,zte-pvt))

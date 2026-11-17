@@ -47,6 +47,7 @@ define KernelPackage/gpio-cascade
   DEPENDS:=@GPIO_SUPPORT +kmod-mux-core
   FILES:=$(LINUX_DIR)/drivers/gpio/gpio-cascade.ko
   AUTOLOAD:=$(call AutoLoad,29,gpio-cascade,1)
+  DEPENDS+=@!TARGET_zte
 endef
 
 define KernelPackage/gpio-cascade/description

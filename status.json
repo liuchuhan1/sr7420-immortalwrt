@@ -1,8 +1,8 @@
 {
-  "date": "2026-11-17",
+  "date": "2026-11-18",
   "release": "development",
   "publishable_image": false,
-  "all_kmods_compiled": false,
+  "all_kmods_compiled": true,
   "usb_lan_verified": false,
   "single_web_upload_verified": false,
   "cold_boot_verified": false,
@@ -41,5 +41,24 @@
     "Vendor firmware requires a verified accepted installer format"
   ],
   "build_host_available": true,
-  "source_privacy_scan_passed": true
+  "source_privacy_scan_passed": true,
+  "preliminary_full_build_passed": true,
+  "final_modular_build_state": "passed",
+  "clean_rebuild_verified": false,
+  "kexec_static_aarch64_built": true,
+  "usb_bundle_hardware_verified": false,
+  "all_selected_kmods_compiled": true,
+  "all_requested_kmods_available": false,
+  "requested_kmods": 1512,
+  "selected_kmods": 1109,
+  "packaged_kmods": 1109,
+  "unselected_kmods": 403,
+  "kernel_abi": "6.18.60~b608e4c72ecf314fc3955d48ca497c9f-r1",
+  "kernel_module_audit_passed": true,
+  "signed_feed_generated": true,
+  "usb_bundle_packaged": true,
+  "usb_bundle_privacy_passed": true,
+  "usb_artifact_verification_passed": true,
+  "usb_bundle_release_tag": "usb44-dev-20261118",
+  "source_privacy_scan_state": "passed"
 }

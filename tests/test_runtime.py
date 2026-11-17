@@ -29,6 +29,6 @@ with tempfile.TemporaryDirectory(prefix='sr7420-runtime-') as tmp:
  # A corrupt DTB must be rejected rather than patched blindly.
  d.write_bytes(b'not a device tree')
  assert subprocess.run([str(t/'stock-import'),str(stock),str(out),str(d),str(m)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0
-for f in [repo/'installer/sr7420-usb.sh.in',repo/'installer/init-usb.sh',* (repo/'files').rglob('*')]:
+for f in [repo/'installer/sr7420-usb.sh.in',*(repo/'installer').rglob('*.sh'),*(repo/'files').rglob('*')]:
  if f.is_file() and f.read_bytes().startswith(b'#!/'):subprocess.run(['sh','-n',str(f)],check=True)
 print('SHA-256 boundary vectors, firmware/BDF TLVs, full per-radio calibration, DTB MAC patch and shell syntax passed')

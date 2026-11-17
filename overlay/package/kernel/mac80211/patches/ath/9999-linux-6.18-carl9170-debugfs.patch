@@ -1,0 +1,46 @@
+--- a/drivers/net/wireless/ath/carl9170/debug.c
++++ b/drivers/net/wireless/ath/carl9170/debug.c
+@@ -75,8 +75,12 @@
+ 
+ 	if (!ar)
+ 		return -ENODEV;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	dfops = debugfs_get_aux(file);
++#else
+ 	dfops = container_of(debugfs_real_fops(file),
+ 			     struct carl9170_debugfs_fops, fops);
++#endif
+ 
+ 	if (!dfops->read)
+ 		return -ENOSYS;
+@@ -128,8 +132,12 @@
+ 
+ 	if (!ar)
+ 		return -ENODEV;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	dfops = debugfs_get_aux(file);
++#else
+ 	dfops = container_of(debugfs_real_fops(file),
+ 			     struct carl9170_debugfs_fops, fops);
++#endif
+ 
+ 	if (!dfops->write)
+ 		return -ENOSYS;
+@@ -815,10 +823,17 @@
+ 	ar->debug_dir = debugfs_create_dir(KBUILD_MODNAME,
+ 		ar->hw->wiphy->debugfsdir);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#define DEBUGFS_ADD(name)						\
++	debugfs_create_file_aux(#name, carl_debugfs_##name ##_ops.attr,	\
++			    ar->debug_dir, ar, (void *)&carl_debugfs_##name ##_ops,				\
++			    &carl_debugfs_##name ## _ops.fops)
++#else
+ #define DEBUGFS_ADD(name)						\
+ 	debugfs_create_file(#name, carl_debugfs_##name ##_ops.attr,	\
+ 			    ar->debug_dir, ar,				\
+ 			    &carl_debugfs_##name ## _ops.fops)
++#endif
+ 
+ 	DEBUGFS_ADD(usb_tx_anch_urbs);
+ 	DEBUGFS_ADD(usb_rx_pool_urbs);

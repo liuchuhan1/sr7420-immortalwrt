@@ -40,6 +40,7 @@ define KernelPackage/leds-group-multicolor
   KCONFIG:=CONFIG_LEDS_GROUP_MULTICOLOR
   FILES:=$(LINUX_DIR)/drivers/leds/rgb/leds-group-multicolor.ko
   AUTOLOAD:=$(call AutoProbe,leds-group-multicolor)
+  DEPENDS+=+kmod-leds-class-multicolor
 endef
 
 define KernelPackage/leds-group-multicolor/description
@@ -182,6 +183,7 @@ define KernelPackage/leds-ktd202x
   KCONFIG:=CONFIG_LEDS_KTD202X
   FILES:= $(LINUX_DIR)/drivers/leds/rgb/leds-ktd202x.ko
   AUTOLOAD:=$(call AutoProbe,leds-ktd202x,1)
+  DEPENDS+=+kmod-leds-class-multicolor
 endef
 
 define KernelPackage/leds-ktd202x/description
@@ -334,6 +336,7 @@ define KernelPackage/leds-lp55xx-common
   KCONFIG:=CONFIG_LEDS_LP55XX_COMMON
   FILES:=$(LINUX_DIR)/drivers/leds/leds-lp55xx-common.ko
   AUTOLOAD:=$(call AutoLoad,60,leds-lp55xx-common,1)
+  DEPENDS+=+kmod-leds-class-multicolor
 endef
 
 define KernelPackage/leds-lp55xx-common/description

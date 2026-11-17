@@ -65,7 +65,9 @@ cleanup() {
   rmdir "$WORK" 2>/dev/null;; esac
  [ "$LOCKED" = 0 ] || rmdir /tmp/sr7420-usb.lock 2>/dev/null
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
 serial_of() {
  p=$(readlink -f "/sys/class/block/$1/device")
  while [ "$p" != / ] && [ -n "$p" ]; do
@@ -182,7 +184,7 @@ if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
   [ -f "$OFFLINE" ] || die 'offline bundle missing; refusing fallback or erasure'
   BUNDLE=$OFFLINE; log 'using offline bundle'
  else
-  [ -n "$URL" ] || URL=$DEFAULT_URL
+  if [ -z "$URL" ]; then URL=$DEFAULT_URL; [ -n "$WANT_SHA" ] || WANT_SHA=$DEFAULT_SHA; fi
   case "$URL" in __*) die 'this source template is not a built installer; USB unchanged';; esac
   [ -n "$URL" ] || die 'no offline bundle and no --url supplied; USB unchanged' 
   case "$URL" in
@@ -197,7 +199,7 @@ if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
   BUNDLE=$WORK/download.tar.gz
   log 'downloading bundle before touching the USB disk'
   if [ -x "$SELF_DIR/tools/bin/curl" ]; then
-   curl_fetch() { "$SELF_DIR/tools/lib/ld-musl-aarch64.so.1" --library-path "$SELF_DIR/tools/lib" "$SELF_DIR/tools/bin/curl" "$@"; }
+   curl_fetch() { "$SELF_DIR/tools/lib/ld-musl-aarch64.so.1" --library-path "$SELF_DIR/tools/lib" "$SELF_DIR/tools/bin/curl" --cacert "$SELF_DIR/tools/ca-certificates.crt" "$@"; }
   elif command -v curl >/dev/null 2>&1; then
    curl_fetch() { curl "$@"; }
   else die 'verified TLS curl runtime is required; USB unchanged'; fi
@@ -224,7 +226,7 @@ if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
  tr -d '\000' </proc/device-tree/model | grep -q SR7420 || die 'not an SR7420'
  mkdir "$WORK/device-firmware"
  cp "$PAYLOAD/boot/board-template.dtb" "$WORK/device-board.dtb"
- "$TOOLS/bin/stock-import" /lib/firmware/qcn9224 "$WORK/device-firmware" "$WORK/device-board.dtb" /sys/class/net/eth0/address
+ "$PAYLOAD/stock-import" /lib/firmware/qcn9224 "$WORK/device-firmware" "$WORK/device-board.dtb" /sys/class/net/eth0/address
  assert_not_mounted
  [ "$(serial_of "$DISK")" = "$SERIAL" ] || die 'USB identity changed during download'
  [ "$(cat "/sys/class/block/$DISK/size")" = "$SECTORS" ] || die 'USB capacity changed'
@@ -285,7 +287,7 @@ cp -a "$BM/." "$STAGE/"
 verify_manifest "$STAGE" "$STAGE/boot.sha256" || die 'loader-stage checksum mismatch'
 verify_manifest "$STAGE" "$STAGE/device.sha256" || die 'device DTB checksum mismatch' 
 CMDLINE="console=ttyAMA0,115200n8 earlycon=sr7420ram,mmio,0xb52f0000 keep_bootcon loglevel=6 nosmp panic=15 sr7420_usb_serial=$ACTUAL_SERIAL"
-"$STAGE/kexec" -c -l "$STAGE/Image" --dtb="$STAGE/board.dtb"
+"$STAGE/kexec" -c -l "$STAGE/Image" --dtb="$STAGE/board.dtb" --append="$CMDLINE"
 [ "$(cat /sys/kernel/kexec_loaded)" = 1 ] || die 'kexec did not load'
 log 'USB kernel and DTB loaded into RAM'
 [ "$LOAD_ONLY" = 0 ] || exit 0

@@ -124,9 +124,11 @@ define KernelPackage/libie
   SUBMENU:=$(NETWORK_DEVICES_MENU)
   TITLE:=Intel Ethernet library
   DEPENDS:=+kmod-libeth
-  KCONFIG:=CONFIG_LIBIE
+  KCONFIG:=CONFIG_LIBIE CONFIG_LIBIE_ADMINQ CONFIG_LIBIE_FWLOG
   HIDDEN:=1
   FILES:=$(LINUX_DIR)/drivers/net/ethernet/intel/libie/libie.ko
+  FILES+=$(LINUX_DIR)/drivers/net/ethernet/intel/libie/libie_adminq.ko \
+          $(LINUX_DIR)/drivers/net/ethernet/intel/libie/libie_fwlog.ko
 endef
 
 define KernelPackage/libie/description
@@ -139,9 +141,10 @@ $(eval $(call KernelPackage,libie))
 define KernelPackage/libeth
   SUBMENU:=$(NETWORK_DEVICES_MENU)
   TITLE:=Common Intel Ethernet library
-  KCONFIG:=CONFIG_LIBETH
+  KCONFIG:=CONFIG_LIBETH CONFIG_LIBETH_XDP
   HIDDEN:=1
   FILES:=$(LINUX_DIR)/drivers/net/ethernet/intel/libeth/libeth.ko
+  FILES+=$(LINUX_DIR)/drivers/net/ethernet/intel/libeth/libeth_xdp.ko
 endef
 
 define KernelPackage/libeth/description
@@ -154,9 +157,10 @@ $(eval $(call KernelPackage,libeth))
 define KernelPackage/libphy
   SUBMENU:=$(NETWORK_DEVICES_MENU)
   TITLE:=PHY library
-  KCONFIG:=CONFIG_PHYLIB \
+  KCONFIG:=CONFIG_PHY_PACKAGE CONFIG_PHYLIB \
 	   CONFIG_PHYLIB_LEDS=y
   FILES:=$(LINUX_DIR)/drivers/net/phy/libphy.ko
+  FILES+=$(LINUX_DIR)/drivers/net/phy/phy_package.ko
   AUTOLOAD:=$(call AutoLoad,15,libphy,1)
 endef
 
@@ -531,6 +535,7 @@ define KernelPackage/phy-rtl8261n
    DEPENDS:=+kmod-libphy
    FILES:=$(LINUX_DIR)/drivers/net/phy/rtl8261n/rtl8261n.ko
    AUTOLOAD:=$(call AutoLoad,18,rtl8261n,1)
+  DEPENDS+=@!TARGET_zte
 endef
 
 define KernelPackage/phy-rtl8261n/description
@@ -1368,6 +1373,7 @@ define KernelPackage/ixgbe
     CONFIG_IXGBE_DCB=y
   FILES:=$(LINUX_DIR)/drivers/net/ethernet/intel/ixgbe/ixgbe.ko
   AUTOLOAD:=$(call AutoLoad,35,ixgbe)
+  DEPENDS+=+kmod-libie
 endef
 
 define KernelPackage/ixgbe/description
@@ -1434,7 +1440,7 @@ $(eval $(call KernelPackage,ice))
 define KernelPackage/iavf
   SUBMENU:=$(NETWORK_DEVICES_MENU)
   TITLE:=Intel(R) Ethernet Adaptive Virtual Function support
-  DEPENDS:=@PCI_SUPPORT +kmod-libie
+  DEPENDS:=@PCI_SUPPORT +kmod-libie +kmod-ptp
   KCONFIG:= \
        CONFIG_I40EVF \
        CONFIG_IAVF
@@ -1683,6 +1689,7 @@ define KernelPackage/dm9000
     CONFIG_DM9000_FORCE_SIMPLE_PHY_POLL=y
   FILES:=$(LINUX_DIR)/drivers/net/ethernet/davicom/dm9000.ko
   AUTOLOAD:=$(call AutoLoad,34,dm9000)
+  DEPENDS+=@!TARGET_zte
 endef
 
 define KernelPackage/dm9000/description

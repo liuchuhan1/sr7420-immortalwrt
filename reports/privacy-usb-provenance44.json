@@ -1,0 +1,129 @@
+{
+  "passed": true,
+  "private_values_in_report": false,
+  "proofs": [
+    {
+      "artifact": "rootfs/etc/init.d/dnsmasq",
+      "sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "31e2ac4ded9c8896c7aefd3dcb9a46ef77440fbd",
+        "path": "package/network/services/dnsmasq/files/dnsmasq.init"
+      }
+    },
+    {
+      "artifact": "rootfs/lib/netifd/hostapd.sh",
+      "sha256": "1433002b8c6b1e23a337a15a37763a6c2ef29d82938f36ef63fdf46e611929b6",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "31e2ac4ded9c8896c7aefd3dcb9a46ef77440fbd",
+        "path": "package/network/config/wifi-scripts/files/lib/netifd/hostapd.sh"
+      }
+    },
+    {
+      "artifact": "rootfs/usr/share/hostap/common.uc",
+      "sha256": "8f489d3c4fdde92b6dd027aadffc96880837664f3c2a1b1f6f3aeb9fdd484c0c",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "31e2ac4ded9c8896c7aefd3dcb9a46ef77440fbd",
+        "path": "package/network/config/wifi-scripts/files/usr/share/hostap/common.uc"
+      }
+    },
+    {
+      "artifact": "rootfs/usr/share/schema/wireless.wifi-station.json",
+      "sha256": "db3d47e6458f64721b65d30c050e575fff0997be2fbfe07970a599a256ae6eda",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "31e2ac4ded9c8896c7aefd3dcb9a46ef77440fbd",
+        "path": "package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-station.json"
+      }
+    },
+    {
+      "artifact": "rootfs/usr/share/ucode/wifi/ap.uc",
+      "sha256": "faf0c281b881291ef26a71d2fe003f79e948a81be17ee3d27dd437e28696809c",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "31e2ac4ded9c8896c7aefd3dcb9a46ef77440fbd",
+        "path": "package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc"
+      }
+    },
+    {
+      "artifact": "rootfs/usr/share/rpcd/ucode/luci.client-limits",
+      "sha256": "4352cf6d0107448953c4b273ea870035d1884ed67d5d8b46d0bee22d39722de1",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "d438535d5d524c6fbd2863d507d6268df8af1e09",
+        "path": "modules/luci-mod-status/root/usr/share/rpcd/ucode/luci.client-limits"
+      }
+    },
+    {
+      "artifact": "rootfs/www/luci-static/resources/network.js",
+      "sha256": "14827b5ab5b88d44e1cfd21fbeb3521d5c10f856eb3c06a864c5d5d1b68040cb",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "d438535d5d524c6fbd2863d507d6268df8af1e09",
+        "path": "modules/luci-base/htdocs/luci-static/resources/network.js"
+      }
+    },
+    {
+      "artifact": "rootfs/www/luci-static/resources/view/network/wireless.js",
+      "sha256": "bb6774b89c7a2a5e2d41a5c20054fa0d53a43128cf8586102554084207b534e1",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "d438535d5d524c6fbd2863d507d6268df8af1e09",
+        "path": "modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js"
+      }
+    },
+    {
+      "artifact": "rootfs/www/luci-static/resources/view/status/include/40_dhcp.js",
+      "sha256": "edcb965e4619ad08ccf24cd7a40384abc44d13e882211dbb1e78a812f6e935de",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "d438535d5d524c6fbd2863d507d6268df8af1e09",
+        "path": "modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/40_dhcp.js"
+      }
+    },
+    {
+      "artifact": "rootfs/www/luci-static/resources/view/status/include/60_wifi.js",
+      "sha256": "965bcc335a875b3a34d6f61f50f1eaf62e2b212db2cd1722fe6422a26f2cb2dc",
+      "classification": "upstream_public_constant",
+      "source": {
+        "commit": "d438535d5d524c6fbd2863d507d6268df8af1e09",
+        "path": "modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/60_wifi.js"
+      }
+    },
+    {
+      "artifact": "payload/boot/Image",
+      "sha256": "80d90d6e94c5d1b1a72161bd2939acfd76840479e469949a3b8a1b76112a30eb",
+      "classification": "upstream_public_constant",
+      "source": {
+        "path": "linux-6.18.60/net/ipv4/arp.c",
+        "embedded_bootstrap_verified": true
+      }
+    },
+    {
+      "artifact": "sr7420-usb.sh",
+      "sha256": "ae9d40b997bc64a953558e4d8bb6c2d919c5a5b18625735d41ade902c71d0b77",
+      "classification": "intentional_public_repository_url",
+      "source": {
+        "purpose": "published project download destination"
+      }
+    },
+    {
+      "artifact": "bundle-report.json",
+      "sha256": "ffa962d7d1f9cbaee320abd148261a321426eb73c30ee7262ce788983ce5fd8b",
+      "classification": "intentional_public_repository_url",
+      "source": {
+        "purpose": "published project download destination"
+      }
+    },
+    {
+      "artifact": "rootfs/etc/apk/repositories.d/sr7420.list",
+      "sha256": "f9cf444b352072ad34f735d327aa932c98842491d3657efbf978444766682de3",
+      "classification": "intentional_public_repository_url",
+      "source": {
+        "purpose": "published project download destination"
+      }
+    }
+  ]
+}

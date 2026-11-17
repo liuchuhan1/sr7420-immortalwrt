@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "tests": [
+    "accounts",
+    "artifacts",
+    "apk_metadata",
+    "privacy_scan",
+    "runtime"
+  ],
+  "scope": "host regression tests; no hardware boot"
+}

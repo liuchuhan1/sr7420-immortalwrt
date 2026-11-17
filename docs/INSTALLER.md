@@ -22,7 +22,7 @@
 ## 尚待完成
 
 1. 验证原厂 `/supgrade.html` 后端接受的安装格式，或找到配置恢复的、可恢复且可验证的持久启动入口。
-2. 完成并验收发行 bundle 的最小 initramfs、模块依赖、完整工具运行库打包。
+2. 在原厂实测本次静态 kexec、USB 最小 initramfs 和模块化后的控制器驱动。离线打包与检查已经通过。
 3. 脱敏新镜像在 USB 根系统下的 LAN、DHCP、SSH/LuCI 实机验证。
 4. 自启/卸载/回退在每种故障阶段的端到端测试。
 
@@ -31,3 +31,17 @@
 `.in` 文件是构建输入，包含明确的发行 URL/SHA 占位符。它不是已经可用的发布安装器。当前也不应该设置无人值守自启。
 
 要回原厂，请先正常关机/重启并停止 USB 根系统，再拔盘。运行中的根文件系统不能热拔。
+
+## USB44 实验预发布
+
+离线包和启动器已生成，校验结果见 `reports/usb-artifact-verification44.json`；新系统的网口仍待实机验证。当前不要配置无人值守切换。
+
+1. 下载同一 Release 的 `sr7420-usb44-launcher.tar.gz`、`sr7420-usb44-offline.tar.gz` 和 `SHA256SUMS`。
+2. 在可信电脑先核对 SHA256，解开 launcher。把离线包放到其中 `sr7420-usb.sh` 旁边。保留 launcher 内完整的 `tools/`、`sha256` 和辅助脚本。
+3. 把这些文件放在原厂系统可执行的目录中，不能放在接下来要格式化的目标 U 盘上。
+4. 在原厂 root shell 运行 `sh sr7420-usb.sh detect`，确认总盘和物理序列号。
+5. 安装命令为 `sh sr7420-usb.sh install --device /dev/sdX --serial YOUR_USB_SERIAL --erase`。这里的设备名和序列号必须替换为 detect 的实际结果；这一步会清空匹配的目标 U 盘。
+6. 离线包不存在时脚本使用固定 HTTPS 地址下载，并校验该发行包 SHA256。已有完整、校验通过的系统会直接复用。安装完成本身不会切换内核。
+7. 待可以承担网络中断并能正常重启恢复时，再运行 `sh sr7420-usb.sh boot --device /dev/sdX --serial YOUR_USB_SERIAL`。上次启动没有通过就绪检查时，必须排查日志后手工添加 `--retry`。
+
+`/dev/sdX` 和 `YOUR_USB_SERIAL` 是说明中的替换标记，不是预先选定的设备。未验证原厂持久入口，因此 launcher 中的自启辅助脚本不会自行安装。

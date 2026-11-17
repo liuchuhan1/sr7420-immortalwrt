@@ -1,0 +1,220 @@
+{
+  "passed": true,
+  "objects_scanned": 6096,
+  "findings": [],
+  "reviewed_upstream_matches": [
+    {
+      "path": "payload/boot/Image",
+      "artifact_sha256": "80d90d6e94c5d1b1a72161bd2939acfd76840479e469949a3b8a1b76112a30eb",
+      "reason": "Verified zero MAC formatter constant in upstream ARP source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!etc/init.d/dnsmasq",
+      "artifact_sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!etc/init.d/dnsmasq",
+      "artifact_sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!lib/netifd/hostapd.sh",
+      "artifact_sha256": "1433002b8c6b1e23a337a15a37763a6c2ef29d82938f36ef63fdf46e611929b6",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!usr/share/hostap/common.uc",
+      "artifact_sha256": "8f489d3c4fdde92b6dd027aadffc96880837664f3c2a1b1f6f3aeb9fdd484c0c",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!usr/share/rpcd/ucode/luci.client-limits",
+      "artifact_sha256": "4352cf6d0107448953c4b273ea870035d1884ed67d5d8b46d0bee22d39722de1",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!usr/share/schema/wireless.wifi-station.json",
+      "artifact_sha256": "db3d47e6458f64721b65d30c050e575fff0997be2fbfe07970a599a256ae6eda",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!usr/share/ucode/wifi/ap.uc",
+      "artifact_sha256": "faf0c281b881291ef26a71d2fe003f79e948a81be17ee3d27dd437e28696809c",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!www/luci-static/resources/network.js",
+      "artifact_sha256": "14827b5ab5b88d44e1cfd21fbeb3521d5c10f856eb3c06a864c5d5d1b68040cb",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!www/luci-static/resources/view/network/wireless.js",
+      "artifact_sha256": "bb6774b89c7a2a5e2d41a5c20054fa0d53a43128cf8586102554084207b534e1",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!www/luci-static/resources/view/status/include/40_dhcp.js",
+      "artifact_sha256": "edcb965e4619ad08ccf24cd7a40384abc44d13e882211dbb1e78a812f6e935de",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!www/luci-static/resources/view/status/include/60_wifi.js",
+      "artifact_sha256": "965bcc335a875b3a34d6f61f50f1eaf62e2b212db2cd1722fe6422a26f2cb2dc",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/etc/init.d/dnsmasq",
+      "artifact_sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/etc/init.d/dnsmasq",
+      "artifact_sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/lib/netifd/hostapd.sh",
+      "artifact_sha256": "1433002b8c6b1e23a337a15a37763a6c2ef29d82938f36ef63fdf46e611929b6",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/usr/share/hostap/common.uc",
+      "artifact_sha256": "8f489d3c4fdde92b6dd027aadffc96880837664f3c2a1b1f6f3aeb9fdd484c0c",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/usr/share/rpcd/ucode/luci.client-limits",
+      "artifact_sha256": "4352cf6d0107448953c4b273ea870035d1884ed67d5d8b46d0bee22d39722de1",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/usr/share/schema/wireless.wifi-station.json",
+      "artifact_sha256": "db3d47e6458f64721b65d30c050e575fff0997be2fbfe07970a599a256ae6eda",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/usr/share/ucode/wifi/ap.uc",
+      "artifact_sha256": "faf0c281b881291ef26a71d2fe003f79e948a81be17ee3d27dd437e28696809c",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/www/luci-static/resources/network.js",
+      "artifact_sha256": "14827b5ab5b88d44e1cfd21fbeb3521d5c10f856eb3c06a864c5d5d1b68040cb",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/www/luci-static/resources/view/network/wireless.js",
+      "artifact_sha256": "bb6774b89c7a2a5e2d41a5c20054fa0d53a43128cf8586102554084207b534e1",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/www/luci-static/resources/view/status/include/40_dhcp.js",
+      "artifact_sha256": "edcb965e4619ad08ccf24cd7a40384abc44d13e882211dbb1e78a812f6e935de",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "rootfs/www/luci-static/resources/view/status/include/60_wifi.js",
+      "artifact_sha256": "965bcc335a875b3a34d6f61f50f1eaf62e2b212db2cd1722fe6422a26f2cb2dc",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!boot/Image",
+      "artifact_sha256": "80d90d6e94c5d1b1a72161bd2939acfd76840479e469949a3b8a1b76112a30eb",
+      "reason": "Verified zero MAC formatter constant in upstream ARP source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!etc/init.d/dnsmasq",
+      "artifact_sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!etc/init.d/dnsmasq",
+      "artifact_sha256": "cfa8932bced6c813cab5fc1648389e71a963811914c8e82ba26163a11e3de9cf",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!lib/netifd/hostapd.sh",
+      "artifact_sha256": "1433002b8c6b1e23a337a15a37763a6c2ef29d82938f36ef63fdf46e611929b6",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!usr/share/hostap/common.uc",
+      "artifact_sha256": "8f489d3c4fdde92b6dd027aadffc96880837664f3c2a1b1f6f3aeb9fdd484c0c",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!usr/share/rpcd/ucode/luci.client-limits",
+      "artifact_sha256": "4352cf6d0107448953c4b273ea870035d1884ed67d5d8b46d0bee22d39722de1",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!usr/share/schema/wireless.wifi-station.json",
+      "artifact_sha256": "db3d47e6458f64721b65d30c050e575fff0997be2fbfe07970a599a256ae6eda",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!usr/share/ucode/wifi/ap.uc",
+      "artifact_sha256": "faf0c281b881291ef26a71d2fe003f79e948a81be17ee3d27dd437e28696809c",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!www/luci-static/resources/network.js",
+      "artifact_sha256": "14827b5ab5b88d44e1cfd21fbeb3521d5c10f856eb3c06a864c5d5d1b68040cb",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!www/luci-static/resources/view/network/wireless.js",
+      "artifact_sha256": "bb6774b89c7a2a5e2d41a5c20054fa0d53a43128cf8586102554084207b534e1",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!www/luci-static/resources/view/status/include/40_dhcp.js",
+      "artifact_sha256": "edcb965e4619ad08ccf24cd7a40384abc44d13e882211dbb1e78a812f6e935de",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!www/luci-static/resources/view/status/include/60_wifi.js",
+      "artifact_sha256": "965bcc335a875b3a34d6f61f50f1eaf62e2b212db2cd1722fe6422a26f2cb2dc",
+      "reason": "Verified public wildcard/example MAC constant from pinned upstream source"
+    }
+  ],
+  "reviewed_public_repository_matches": [
+    {
+      "path": "bundle-report.json",
+      "artifact_sha256": "ffa962d7d1f9cbaee320abd148261a321426eb73c30ee7262ce788983ce5fd8b",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "launcher/sr7420-usb.sh",
+      "artifact_sha256": "ae9d40b997bc64a953558e4d8bb6c2d919c5a5b18625735d41ade902c71d0b77",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "payload/rootfs.tar.gz!etc/apk/repositories.d/sr7420.list",
+      "artifact_sha256": "f9cf444b352072ad34f735d327aa932c98842491d3657efbf978444766682de3",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "rootfs/etc/apk/repositories.d/sr7420.list",
+      "artifact_sha256": "f9cf444b352072ad34f735d327aa932c98842491d3657efbf978444766682de3",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "sr7420-usb.sh",
+      "artifact_sha256": "ae9d40b997bc64a953558e4d8bb6c2d919c5a5b18625735d41ade902c71d0b77",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "sr7420-usb44-launcher.tar.gz!sr7420-usb.sh",
+      "artifact_sha256": "ae9d40b997bc64a953558e4d8bb6c2d919c5a5b18625735d41ade902c71d0b77",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "sr7420-usb44-offline.tar.gz!rootfs.tar.gz!etc/apk/repositories.d/sr7420.list",
+      "artifact_sha256": "f9cf444b352072ad34f735d327aa932c98842491d3657efbf978444766682de3",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    }
+  ],
+  "private_values_in_report": false
+}

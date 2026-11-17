@@ -1,0 +1,14 @@
+--- a/kernel-module/Makefile
++++ b/kernel-module/Makefile
+@@ -22,9 +22,9 @@
+     RTPENGINE_VERSION+=undefined
+   endif
+ endif
+-EXTRA_CFLAGS+=	-DRTPENGINE_VERSION="\"$(RTPENGINE_VERSION)\""
++ccflags-y+=	-DRTPENGINE_VERSION="\"$(RTPENGINE_VERSION)\""
+ 
+-EXTRA_CFLAGS += -D__RE_EXTERNAL
++ccflags-y += -D__RE_EXTERNAL
+ 
+ obj-m        += xt_RTPENGINE.o
+ 

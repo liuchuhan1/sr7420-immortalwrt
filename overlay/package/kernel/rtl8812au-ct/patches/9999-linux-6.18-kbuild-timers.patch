@@ -1,0 +1,24 @@
+--- a/Makefile
++++ b/Makefile
+@@ -1643,3 +1643,6 @@
+ clean:
+ 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KSRC) M=$(shell pwd) clean
+ endif
++
++# Kbuild 6.18 consumes ccflags-y instead of EXTRA_CFLAGS.
++ccflags-y += $(EXTRA_CFLAGS)
+--- a/include/osdep_service_linux.h
++++ b/include/osdep_service_linux.h
+@@ -21,6 +21,12 @@
+ #define __OSDEP_LINUX_SERVICE_H_
+ 
+ #include <linux/version.h>
++#include <linux/timer.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#define del_timer_sync timer_delete_sync
++#define del_timer timer_delete
++#define from_timer(var, callback_timer, timer_fieldname) timer_container_of(var, callback_timer, timer_fieldname)
++#endif
+ #include <linux/spinlock.h>
+ #include <linux/compiler.h>
+ #include <linux/kernel.h>

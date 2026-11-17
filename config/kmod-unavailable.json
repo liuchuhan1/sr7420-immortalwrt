@@ -1,0 +1,56 @@
+{
+  "target": "zte/zx279133",
+  "kernel": "6.18.60",
+  "packages": {
+    "kmod-crypto-hw-hifn-795x": {
+      "function": "HIFN 795x PCI crypto accelerator",
+      "reason": "The kernel requires !ARCH_DMA_ADDR_T_64BIT; incompatible with this ARM64 target.",
+      "kernel_reference": "drivers/crypto/Kconfig"
+    },
+    "kmod-crypto-hw-padlock": {
+      "function": "VIA PadLock CPU crypto acceleration",
+      "reason": "The kernel requires X86; unavailable on this ARM64 target.",
+      "kernel_reference": "drivers/crypto/Kconfig"
+    },
+    "kmod-crypto-test": {
+      "function": "tcrypt Crypto API test module",
+      "reason": "CONFIG_CRYPTO_TEST/tcrypt is absent from the pinned Linux 6.18 source.",
+      "kernel_reference": "crypto/Kconfig"
+    },
+    "kmod-fs-reiserfs": {
+      "function": "ReiserFS filesystem",
+      "reason": "ReiserFS support is absent from the pinned Linux 6.18 source.",
+      "kernel_reference": "fs/Kconfig"
+    },
+    "kmod-gpio-cascade": {
+      "function": "Cascaded GPIO interrupt controller",
+      "reason": "The downstream CONFIG_GPIO_CASCADE driver is absent from the pinned kernel source.",
+      "kernel_reference": "drivers/gpio/Kconfig"
+    },
+    "kmod-i2c-pxa": {
+      "function": "Intel PXA I2C controller",
+      "reason": "Requires PXA/MMP/MVEBU or 32-bit x86; this target satisfies none of those hardware constraints.",
+      "kernel_reference": "drivers/i2c/busses/Kconfig"
+    },
+    "kmod-phy-rtl8261n": {
+      "function": "Downstream Realtek RTL8261N PHY",
+      "reason": "The downstream CONFIG_RTL8261N_PHY implementation is absent from the pinned kernel source.",
+      "kernel_reference": "drivers/net/phy/Kconfig"
+    },
+    "kmod-dm9000": {
+      "function": "Davicom DM9000 parallel Ethernet controller",
+      "reason": "Requires ARM32/MIPS/Coldfire/NIOS2 or COMPILE_TEST; not an ARM64 runtime driver.",
+      "kernel_reference": "drivers/net/ethernet/davicom/Kconfig"
+    },
+    "kmod-echo": {
+      "function": "Legacy mISDN/DAHDI echo cancellation",
+      "reason": "CONFIG_ECHO and the referenced driver are absent from the pinned kernel source.",
+      "kernel_reference": "drivers/misc/Kconfig"
+    },
+    "kmod-rtc-mv": {
+      "function": "Marvell SoC RTC",
+      "reason": "Requires ARCH_DOVE or ARCH_MVEBU, which is a different SoC family.",
+      "kernel_reference": "drivers/rtc/Kconfig"
+    }
+  }
+}

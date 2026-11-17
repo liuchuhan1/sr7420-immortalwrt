@@ -1,0 +1,14 @@
+--- a/extensions/pknock/xt_pknock.c
++++ b/extensions/pknock/xt_pknock.c
+@@ -23,6 +23,11 @@
+ #include <linux/spinlock.h>
+ #include <linux/jiffies.h>
+ #include <linux/timer.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#define del_timer timer_delete
++#define from_timer(var, callback_timer, timer_fieldname) \
++	timer_container_of(var, callback_timer, timer_fieldname)
++#endif
+ #include <linux/seq_file.h>
+ #include <linux/connector.h>
+ #include <linux/netfilter/x_tables.h>

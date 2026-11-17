@@ -1,0 +1,20 @@
+--- a/core/rtw_security.c
++++ b/core/rtw_security.c
+@@ -2249,7 +2249,7 @@
+ }
+ 
+ /* Initialize the hash state */
+-static void sha256_init(struct rtl_sha256_state *md)
++static void rtw_sha256_init(struct rtl_sha256_state *md)
+ {
+ 	md->curlen = 0;
+ 	md->length = 0;
+@@ -2366,7 +2366,7 @@
+ 	struct rtl_sha256_state ctx;
+ 	size_t i;
+ 
+-	sha256_init(&ctx);
++	rtw_sha256_init(&ctx);
+ 	for (i = 0; i < num_elem; i++)
+ 		if (sha256_process(&ctx, addr[i], len[i]))
+ 			return -1;

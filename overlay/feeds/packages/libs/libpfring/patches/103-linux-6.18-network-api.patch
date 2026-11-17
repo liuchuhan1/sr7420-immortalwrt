@@ -1,0 +1,60 @@
+Subject: [PATCH] pf_ring: adapt netdevice flags and bind callback to Linux 6.18
+
+Keep the socket address and interface flag behavior while using the API
+exposed by the pinned target kernel. Earlier kernel signatures are retained.
+
+--- a/kernel/pf_ring.c
++++ b/kernel/pf_ring.c
+@@ -142,6 +142,13 @@
+ 
+ #include "linux/pf_ring.h"
+ 
++/* Compatibility with the pinned Linux 6.18 network API. */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,18,0)
++#define pfring_dev_get_flags netif_get_flags
++#else
++#define pfring_dev_get_flags dev_get_flags
++#endif
++
+ #ifndef GIT_REV
+ #define GIT_REV "unknown"
+ #endif
+@@ -5267,7 +5274,7 @@
+   debug_printk(1, "checking promisc for %s\n", netdev->name);
+ 
+   rtnl_lock();
+-  if_flags = (short) dev_get_flags(netdev);
++  if_flags = (short) pfring_dev_get_flags(netdev);
+   rtnl_unlock();
+ 
+   return !!(if_flags & IFF_PROMISC);
+@@ -5282,7 +5289,7 @@
+ 
+   rtnl_lock();
+ 
+-  if_flags = (short) dev_get_flags(netdev);
++  if_flags = (short) pfring_dev_get_flags(netdev);
+   if(!(if_flags & IFF_PROMISC)) {
+     if_flags |= IFF_PROMISC;
+ #if(LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0) && \
+@@ -5305,7 +5312,7 @@
+ 
+   rtnl_lock();
+ 
+-  if_flags = (short) dev_get_flags(netdev);
++  if_flags = (short) pfring_dev_get_flags(netdev);
+   if(if_flags & IFF_PROMISC) {
+     if_flags &= ~IFF_PROMISC;
+ #if(LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0) && \
+@@ -5646,7 +5653,11 @@
+ /* ************************************* */
+ 
+ /* Bind to a device */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,18,0)
++static int ring_bind(struct socket *sock, struct sockaddr_unsized *sa, int addr_len)
++#else
+ static int ring_bind(struct socket *sock, struct sockaddr *sa, int addr_len)
++#endif
+ {
+   struct sock *sk = sock->sk;
+   struct net *net = sock_net(sk);

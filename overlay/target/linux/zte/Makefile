@@ -28,6 +28,12 @@ define Kernel/Prepare
 		$(LINUX_DIR)/firmware/zte/zx279133/mcode_intel.bin
 endef
 
+# Resolve defaults for newly enabled choices before the compile-time syncconfig.
+define Kernel/Configure
+	$(call Kernel/Configure/Default)
+	$(KERNEL_MAKE) olddefconfig
+endef
+
 define Target/Description
 	Build images for the ZTE ZX279133 SoC family.
 endef

@@ -423,8 +423,8 @@ define KernelPackage/fs-netfs
 	CONFIG_NETFS_SUPPORT \
 	CONFIG_FSCACHE=y \
 	CONFIG_FSCACHE_STATS=y
-  FILES:=$(if $(K618),,$(LINUX_DIR)/fs/netfs/netfs.ko)
-  AUTOLOAD:=$(if $(K618),,$(call AutoLoad,28,netfs))
+  FILES:=$(LINUX_DIR)/fs/netfs/netfs.ko
+  AUTOLOAD:=$(call AutoLoad,28,netfs)
 endef
 
 $(eval $(call KernelPackage,fs-netfs))
@@ -510,6 +510,7 @@ define KernelPackage/fs-nfs-common-rpcsec
 	$(LINUX_DIR)/net/sunrpc/auth_gss/auth_rpcgss.ko \
 	$(LINUX_DIR)/net/sunrpc/auth_gss/rpcsec_gss_krb5.ko
   AUTOLOAD:=$(call AutoLoad,31,auth_rpcgss rpcsec_gss_krb5)
+  DEPENDS+=+kmod-crypto-krb5
 endef
 
 define KernelPackage/fs-nfs-common-rpcsec/description
@@ -604,6 +605,7 @@ define KernelPackage/fs-reiserfs
   KCONFIG:=CONFIG_REISERFS_FS
   FILES:=$(LINUX_DIR)/fs/reiserfs/reiserfs.ko
   AUTOLOAD:=$(call AutoLoad,30,reiserfs,1)
+  DEPENDS+=@!TARGET_zte
 endef
 
 define KernelPackage/fs-reiserfs/description

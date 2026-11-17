@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "objects_scanned": 361,
+  "findings": [],
+  "reviewed_upstream_matches": [],
+  "reviewed_public_repository_matches": [
+    {
+      "path": "reports/bundle-report.json",
+      "artifact_sha256": "ffa962d7d1f9cbaee320abd148261a321426eb73c30ee7262ce788983ce5fd8b",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    }
+  ],
+  "private_values_in_report": false
+}

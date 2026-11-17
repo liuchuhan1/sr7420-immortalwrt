@@ -379,6 +379,7 @@ define KernelPackage/i2c-pxa
   $(call i2c_defaults,$(I2C_PXA_MODULES),50)
   TITLE:=Intel PXA I2C bus driver
   DEPENDS:=+kmod-i2c-core
+  DEPENDS+=@!TARGET_zte
 endef
 
 define KernelPackage/i2c-pxa/description

@@ -120,7 +120,7 @@ $(eval $(call KernelPackage,crypto-ccm))
 
 define KernelPackage/crypto-chacha20poly1305
   TITLE:=ChaCha20-Poly1305 AEAD support, RFC7539 (used by strongSwan IPsec VPN)
-  DEPENDS:=+kmod-crypto-aead +kmod-crypto-manager
+  DEPENDS:=+kmod-crypto-aead +kmod-crypto-manager $(if $(K618),+kmod-crypto-lib-chacha20 +kmod-crypto-lib-poly1305)
   KCONFIG:=CONFIG_CRYPTO_CHACHA20POLY1305
   FILES:=$(LINUX_DIR)/crypto/chacha20poly1305.ko
   AUTOLOAD:=$(call AutoLoad,09,chacha20poly1305)
@@ -147,7 +147,7 @@ define KernelPackage/crypto-crc32
   DEPENDS:=+kmod-crypto-hash
   KCONFIG:=CONFIG_CRYPTO_CRC32
   HIDDEN:=1
-  FILES:=$(LINUX_DIR)/crypto/crc32_generic.ko
+  FILES:=$(if $(K618),$(LINUX_DIR)/crypto/crc32-cryptoapi.ko,$(LINUX_DIR)/crypto/crc32_generic.ko)
   AUTOLOAD:=$(call AutoLoad,04,crc32_generic,1)
   $(call AddDepends/crypto)
 endef
@@ -440,6 +440,7 @@ define KernelPackage/crypto-hw-hifn-795x
   FILES:=$(LINUX_DIR)/drivers/crypto/hifn_795x.ko
   AUTOLOAD:=$(call AutoLoad,09,hifn_795x)
   $(call AddDepends/crypto,+kmod-crypto-des)
+  DEPENDS+=@!TARGET_zte
 endef
 
 $(eval $(call KernelPackage,crypto-hw-hifn-795x))
@@ -471,6 +472,7 @@ define KernelPackage/crypto-hw-padlock
 	$(LINUX_DIR)/drivers/crypto/padlock-sha.ko
   AUTOLOAD:=$(call AutoLoad,09,padlock-aes padlock-sha)
   $(call AddDepends/crypto)
+  DEPENDS+=@!TARGET_zte
 endef
 
 $(eval $(call KernelPackage,crypto-hw-padlock))
@@ -1158,6 +1160,7 @@ define KernelPackage/crypto-test
   KCONFIG:=CONFIG_CRYPTO_TEST
   FILES:=$(LINUX_DIR)/crypto/tcrypt.ko
   $(call AddDepends/crypto,+kmod-crypto-manager)
+  DEPENDS+=@!TARGET_zte
 endef
 
 $(eval $(call KernelPackage,crypto-test))
@@ -1210,3 +1213,14 @@ endef
 
 $(eval $(call KernelPackage,crypto-xxhash))
 
+
+# Linux 6.18 splits the Kerberos library out of SUNRPC.
+define KernelPackage/crypto-krb5
+  TITLE:=Kerberos 5 crypto library
+  KCONFIG:=CONFIG_CRYPTO_KRB5 CONFIG_CRYPTO_KRB5ENC
+  FILES:=$(LINUX_DIR)/crypto/krb5/krb5.ko \
+         $(LINUX_DIR)/crypto/krb5enc.ko
+  $(call AddDepends/crypto,+kmod-crypto-manager +kmod-crypto-authenc +kmod-crypto-cmac +kmod-crypto-hmac +kmod-crypto-sha1 +kmod-crypto-sha256 +kmod-crypto-sha512 +kmod-crypto-cbc +kmod-crypto-cts +kmod-crypto-aes +kmod-crypto-camellia)
+endef
+
+$(eval $(call KernelPackage,crypto-krb5))

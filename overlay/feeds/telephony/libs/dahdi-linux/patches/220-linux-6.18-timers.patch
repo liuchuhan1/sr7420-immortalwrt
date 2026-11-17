@@ -1,0 +1,29 @@
+--- a/include/dahdi/kernel.h
++++ b/include/dahdi/kernel.h
+@@ -38,6 +38,12 @@
+ 
+ #include <dahdi/dahdi_config.h>
+ #include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#define del_timer_sync timer_delete_sync
++#define del_timer timer_delete
++#define from_timer(var, callback_timer, timer_fieldname) \
++	timer_container_of(var, callback_timer, timer_fieldname)
++#endif
+ #include <linux/fs.h>
+ #include <linux/device.h>
+ #include <linux/cdev.h>
+--- a/drivers/dahdi/dahdi_dummy.c
++++ b/drivers/dahdi/dahdi_dummy.c
+@@ -229,7 +229,11 @@
+ 
+ #if defined(USE_HIGHRESTIMER)
+ 	printk(KERN_DEBUG "dahdi_dummy: Trying to load High Resolution Timer\n");
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	hrtimer_setup(&zaptimer, dahdi_dummy_hr_int, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++#else
+ 	hrtimer_init(&zaptimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++#endif
+ 	printk(KERN_DEBUG "dahdi_dummy: Initialized High Resolution Timer\n");
+ 
+ 	/* Set timer callback function */

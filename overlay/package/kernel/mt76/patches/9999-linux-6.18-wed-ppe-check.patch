@@ -1,0 +1,28 @@
+--- a/mt7915/mac.c
++++ b/mt7915/mac.c
+@@ -256,7 +256,11 @@
+ 
+ 	mtk_wed_device_ppe_check(&dev->mt76.mmio.wed, skb,
+ 				 FIELD_GET(MT_DMA_PPE_CPU_REASON, info),
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++				 FIELD_GET(MT_DMA_PPE_ENTRY, info), msta->wcid.idx);
++#else
+ 				 FIELD_GET(MT_DMA_PPE_ENTRY, info));
++#endif
+ }
+ 
+ static int
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -404,7 +404,11 @@
+ 
+ 	mtk_wed_device_ppe_check(&dev->mt76.mmio.wed, skb,
+ 				 FIELD_GET(MT_DMA_PPE_CPU_REASON, info),
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++				 FIELD_GET(MT_DMA_PPE_ENTRY, info), msta->deflink.wcid.idx);
++#else
+ 				 FIELD_GET(MT_DMA_PPE_ENTRY, info));
++#endif
+ }
+ 
+ static int

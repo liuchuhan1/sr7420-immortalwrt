@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "scope": "final source regression tests and separate artifact checks; no hardware boot",
+  "tests": [
+    {
+      "step": "accounts",
+      "rc": 0
+    },
+    {
+      "step": "artifacts",
+      "rc": 0
+    },
+    {
+      "step": "apk_metadata",
+      "rc": 0
+    },
+    {
+      "step": "privacy_scan",
+      "rc": 0
+    },
+    {
+      "step": "runtime",
+      "rc": 0
+    }
+  ],
+  "source_privacy_passed": true,
+  "kmods_metadata_privacy_passed": true,
+  "signed_feed_privacy_passed": true,
+  "usb_privacy_passed": true,
+  "usb_artifact_verification_passed": true,
+  "hardware_verified": false
+}

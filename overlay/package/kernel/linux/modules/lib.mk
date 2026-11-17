@@ -30,7 +30,7 @@ define KernelPackage/lib-crc-itu-t
   SUBMENU:=$(LIB_MENU)
   TITLE:=CRC ITU-T V.41 support
   KCONFIG:=CONFIG_CRC_ITU_T
-  FILES:=$(LINUX_DIR)/lib/crc-itu-t.ko
+  FILES:=$(LINUX_DIR)/lib/$(if $(call kernel_patchver_ge,6.18),crc/)crc-itu-t.ko
   AUTOLOAD:=$(call AutoProbe,crc-itu-t)
 endef
 
@@ -45,7 +45,7 @@ define KernelPackage/lib-crc7
   SUBMENU:=$(LIB_MENU)
   TITLE:=CRC7 support
   KCONFIG:=CONFIG_CRC7
-  FILES:=$(LINUX_DIR)/lib/crc7.ko
+  FILES:=$(LINUX_DIR)/lib/$(if $(call kernel_patchver_ge,6.18),crc/)crc7.ko
   AUTOLOAD:=$(call AutoProbe,crc7)
 endef
 
@@ -60,7 +60,7 @@ define KernelPackage/lib-crc8
   SUBMENU:=$(LIB_MENU)
   TITLE:=CRC8 support
   KCONFIG:=CONFIG_CRC8
-  FILES:=$(LINUX_DIR)/lib/crc8.ko
+  FILES:=$(LINUX_DIR)/lib/$(if $(call kernel_patchver_ge,6.18),crc/)crc8.ko
   AUTOLOAD:=$(call AutoProbe,crc8)
 endef
 
@@ -89,9 +89,10 @@ $(eval $(call KernelPackage,lib-crc16))
 define KernelPackage/lib-crc32c
   SUBMENU:=$(LIB_MENU)
   TITLE:=CRC32 support
-  KCONFIG:=CONFIG_LIBCRC32C
+  DEPENDS+=$(if $(call kernel_patchver_ge,6.18),+kmod-lib-crc32)
+  KCONFIG:=$(if $(call kernel_patchver_ge,6.18),CONFIG_CRC32,CONFIG_LIBCRC32C)
   DEPENDS:=+kmod-crypto-crc32c
-  FILES:=$(LINUX_DIR)/lib/libcrc32c.ko
+  FILES:=$(if $(call kernel_patchver_ge,6.18),,$(LINUX_DIR)/lib/libcrc32c.ko)
   AUTOLOAD:=$(call AutoProbe,libcrc32c)
 endef
 

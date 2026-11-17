@@ -1,0 +1,19 @@
+--- a/util.c
++++ b/util.c
+@@ -21,6 +21,7 @@
+ 
+ #include <crypto/scatterwalk.h>
+ #include <linux/scatterlist.h>
++#include <linux/mm.h>
+ #include "util.h"
+ 
+ /* These were taken from Maxim Levitsky's patch to lkml.
+@@ -45,7 +46,7 @@
+ 
+ 	if (sg->offset >= PAGE_SIZE) {
+ 		struct page *page =
+-			nth_page(sg_page(sg), sg->offset / PAGE_SIZE);
++			pfn_to_page(page_to_pfn(sg_page(sg)) + sg->offset / PAGE_SIZE);
+ 		sg_set_page(sg, page, sg->length, sg->offset % PAGE_SIZE);
+ 	}
+ 
