@@ -1,0 +1,69 @@
+{
+  "release": "sr7420-usb44",
+  "kernel_release": "6.18.60",
+  "kernel_abi": "2b497291254683b6ce56b38338fafb7e",
+  "kmod_index_url": "https://raw.githubusercontent.com/liuchuhan1/sr7420-kmods-r2/main/aarch64_cortex-a53/6.18.60~2b497291254683b6ce56b38338fafb7e-r1/packages.adb",
+  "repository_public_key_sha256": "53b3fe6c8bb045e65f6dcc6519c510ec458bc5bf5b4ee13c9c0d3e436252d8f2",
+  "bootstrap_modules": [
+    "usbcore.ko",
+    "phy-generic.ko",
+    "roles.ko",
+    "dwc3.ko",
+    "dwc3-generic-plat.ko",
+    "xhci-hcd.ko",
+    "xhci-plat-hcd.ko",
+    "scsi_common.ko",
+    "scsi_mod.ko",
+    "usb-storage.ko",
+    "sd_mod.ko",
+    "jbd2.ko",
+    "mbcache.ko",
+    "crc16.ko",
+    "ext4.ko",
+    "uas.ko"
+  ],
+  "tool_libraries": [
+    "libblkid.so.1",
+    "libc.so",
+    "libcom_err.so.0",
+    "libcrypto.so.3",
+    "libcurl.so.4",
+    "libe2p.so.2",
+    "libext2fs.so.2",
+    "libfdisk.so.1",
+    "libgcc_s.so.1",
+    "libncursesw.so.6",
+    "libnghttp2.so.14",
+    "libsmartcols.so.1",
+    "libssl.so.3",
+    "libuuid.so.1",
+    "libz.so.1"
+  ],
+  "bootstrap_cpio_bytes": 3471872,
+  "bundle_bytes": 23875165,
+  "bundle_sha256": "0936aaac1e8b3762dda9a4114feb0f17d7b1e81017ec20d2d4cb5d6961460e71",
+  "kexec_sha256": "d44b391eee0393e4c45f5fb33f1b55a5cdc40fecf407e94714e65a422c7c12d0",
+  "kexec_source_sha256": "6917ed86c951383feabdea31e32019eede3ac5b0492057c13f8bd493f877975b",
+  "kexec_license_sha256": "fa5fc1d1eec39532ea517518eeefd7b6e3c14341a55e5880a0e2a49eee47a5b7",
+  "launcher_bytes": 4074712,
+  "launcher_sha256": "4a5d5bcadd39282d393f4231409265e329043372fa5bff4bd359c131e80c3bb5",
+  "image_sha256": "18f5cc293c1cd8520aafb53ce8eecb925e21c9e8463cab37fdd5e7f5b3350e21",
+  "accounts": {
+    "public_accounts": [
+      "daemon",
+      "ftp",
+      "network",
+      "nobody",
+      "root"
+    ],
+    "non_login_service_accounts": [
+      "dnsmasq",
+      "logd",
+      "ntp",
+      "ubus"
+    ]
+  },
+  "hardware_verified": false,
+  "oem_upload_format": false,
+  "contains_device_calibration": false
+}

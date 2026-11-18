@@ -1,0 +1,23 @@
+#!/bin/sh
+# Run over SSH only after checking DHCP and LuCI from that external client.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+fail() { echo "USB boot not confirmed: $*" >&2; exit 1; }
+case "${1:-}" in ''|--check) :;; *) fail 'usage: sr7420-usb-confirm [--check]';; esac
+[ -S /var/run/ubus/ubus.sock ] || fail ubus
+status=$(ubus -t 2 call network.interface.lan status) || fail lan-status
+[ "$(printf '%s' "$status" | jsonfilter -e '@.up')" = true ] || fail lan-down
+[ -n "$(printf '%s' "$status" | jsonfilter -e '@["ipv4-address"][0].address')" ] || fail lan-address
+for p in lan1 lan2 lan3; do [ -e "/sys/class/net/br-lan/brif/$p" ] || fail "missing-$p"; done
+pidof uhttpd >/dev/null && pidof dropbear >/dev/null || fail management-daemon
+disk=$(cat /etc/sr7420-usb-disk)
+case "$disk" in sd[a-z]) :;; *) fail usb-disk;; esac
+awk -v dev="/dev/${disk}2" '$1==dev && $2=="/" && $3=="ext4" && $4 ~ /(^|,)rw(,|$)/ {ok=1} END {exit !ok}' /proc/mounts || fail usb-root
+[ "${1:-}" != --check ] || exit 0
+[ -n "${SSH_CONNECTION:-}" ] || fail 'external SSH session required'
+boot_id=$(cat /proc/sys/kernel/random/boot_id)
+printf '%s\n' "$boot_id" >/tmp/sr7420-usb-management-confirmed.new
+mv /tmp/sr7420-usb-management-confirmed.new /tmp/sr7420-usb-management-confirmed
+printf 'EXTERNAL_CONFIRM boot=%s peer=%s\n' "$boot_id" "$SSH_CONNECTION" >>/boot-state/stages.log
+sync
+echo "USB management confirmed for boot $boot_id"

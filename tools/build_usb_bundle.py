@@ -2,6 +2,7 @@
 """Build a USB-only development bundle; never create an OEM flashing container."""
 import argparse, json, os, re, shutil, subprocess, time
 from pathlib import Path
+from luci_radio_labels import patch_file, patch_header_file
 from usb_artifacts import (archive_tree, elf_runtime, manifest_tree, module_closure,
                            newc, run, sha256, write)
 
@@ -66,12 +67,13 @@ def main():
     env.update(STAGING_DIR=str(source / 'staging_dir/target-aarch64_cortex-a53_musl'),
                KBUILD_BUILD_USER='builder', KBUILD_BUILD_HOST='sr7420')
     config = (kernel / '.config').read_text()
-    for symbol in ['PROC_FS', 'SYSFS', 'DEVTMPFS', 'BINFMT_ELF', 'BLK_DEV_INITRD', 'MSDOS_PARTITION']:
+    for symbol in ['PROC_FS', 'SYSFS', 'DEVTMPFS', 'DEVMEM', 'BINFMT_ELF', 'BLK_DEV_INITRD', 'MSDOS_PARTITION']:
         assert f'CONFIG_{symbol}=y' in config, ('bootstrap prerequisite must be builtin', symbol)
     assert (args.rootfs / 'sbin/procd').is_file() and (args.rootfs / 'bin/busybox').is_file()
     accounts = verify_accounts(args.rootfs, repo / 'files/etc/shadow')
     for relative in ['etc/config/network', 'etc/config/wireless', 'usr/sbin/sr7420-ram-init',
-                     'usr/sbin/sr7420-boot-guard']:
+                     'usr/sbin/sr7420-boot-guard', 'usr/sbin/sr7420-usb-confirm',
+                     'lib/preinit/81_sr7420_usb_root']:
         assert (args.rootfs / relative).read_bytes() == (repo / 'files' / relative).read_bytes(), relative
     output.mkdir(parents=True)
     shutil.copy2(args.kexec_source, output / 'kexec-tools-corresponding-source.tar.gz')
@@ -137,6 +139,8 @@ def main():
     shutil.copy2(runtime / 'pci-quiesce', boot / 'pci-quiesce')
     shutil.copy2(args.kexec, boot / 'kexec')
     assert 'INTERP' not in run([readelf, '-l', boot / 'kexec']).stdout, 'Use a static kexec binary'
+    patch_file(root / 'www/luci-static/resources/network.js')
+    patch_header_file(root / 'usr/share/ucode/luci/template/header.ut')
     # Only immutable runtime files are checked on subsequent boots. UCI defaults,
     # passwords and normal configuration may legitimately change after first boot.
     immutable = [p for p in root.rglob('*') if p.is_file() and any(
@@ -150,11 +154,13 @@ def main():
     scratch = output / 'bootstrap'
     scratch.mkdir()
     entries = [(name, b'', 0o040755, 0, 0) for name in
-               ['bin', 'lib', 'lib/modules', 'dev', 'proc', 'sys', 'new_root']]
-    bootstrap_bins = [root / 'bin/busybox']
+               ['bin', 'sbin', 'lib', 'lib/modules', 'lib/modules/' + version, 'dev', 'proc', 'sys', 'new_root']]
+    bootstrap_bins = [root / 'bin/busybox', root / 'sbin/kmodloader']
     for name, path in elf_runtime(readelf, bootstrap_bins, libraries_at).items():
         entries.append(('lib/' + name, path.read_bytes(), 0o100755, 0, 0))
     entries += [('bin/busybox', bootstrap_bins[0].read_bytes(), 0o100755, 0, 0),
+                ('sbin/kmodloader', bootstrap_bins[1].read_bytes(), 0o100755, 0, 0),
+                ('sbin/insmod', b'kmodloader', 0o120777, 0, 0),
                 ('lib/ld-musl-aarch64.so.1', b'libc.so', 0o120777, 0, 0),
                 ('bin/sh', b'busybox', 0o120777, 0, 0),
                 ('init', (repo / 'installer/init-usb.sh').read_bytes(), 0o100755, 0, 0),
@@ -164,8 +170,9 @@ def main():
         target = scratch / module.name
         shutil.copy2(module, target)
         run([str(cross) + 'strip', '--strip-debug', target])
-        entries.append(('lib/modules/' + target.name, target.read_bytes(), 0o100644, 0, 0))
-        commands.append('/bin/busybox insmod /lib/modules/' + target.name + ' || return 1')
+        entries.append(('lib/modules/' + version + '/' + target.name, target.read_bytes(), 0o100644, 0, 0))
+        commands.append('if output=$(/sbin/insmod /lib/modules/' + version + '/' + target.name + ' 2>&1); then :; else '
+                        'echo "<0>SR7420_STD: USB44 MODULE_FAILED ' + target.name + ': $output" >/dev/kmsg; return 1; fi')
     commands.append('return 0')
     entries.append(('load-usb.sh', ('\n'.join(commands) + '\n').encode(), 0o100755, 0, 0))
     cpio = newc(entries)

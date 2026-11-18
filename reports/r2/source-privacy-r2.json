@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "objects_scanned": 407,
+  "findings": [],
+  "reviewed_upstream_matches": [],
+  "reviewed_public_repository_matches": [
+    {
+      "path": "config/sr7420-r2.list",
+      "artifact_sha256": "096ce9e2c663e037e7e55da17fa6f61312c5a4da34bd15777f82b886f11a1b1c",
+      "reason": "Verified canonical public project download URL without credentials"
+    },
+    {
+      "path": "reports/bundle-report.json",
+      "artifact_sha256": "ffa962d7d1f9cbaee320abd148261a321426eb73c30ee7262ce788983ce5fd8b",
+      "reason": "Intentional public release/repository destination; no authentication data"
+    },
+    {
+      "path": "reports/r2/bundle-report.json",
+      "artifact_sha256": "4577eb0e4d48f1f608eb129716bb0ec4dcd777422f7f8b575192397e6cc96bc2",
+      "reason": "Verified canonical public project download URL without credentials"
+    }
+  ],
+  "private_values_in_report": false
+}

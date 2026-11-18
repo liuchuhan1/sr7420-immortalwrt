@@ -1,30 +1,25 @@
 #!/bin/sh
-# Pending state is set by the stock launcher and cleared only after LAN + services.
+# Cancel rollback only after an external client confirms this boot's management.
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
+BOOT_ID=$(cat /proc/sys/kernel/random/boot_id) || exit 1
+MARKER=/tmp/sr7420-usb-management-confirmed
 n=0
-while [ "$n" -lt 180 ]; do
+while [ "$n" -lt 120 ]; do
  sleep 1; n=$((n+1))
- [ -S /var/run/ubus/ubus.sock ] || continue
- status=$(ubus call network.interface.lan status 2>/dev/null) || continue
- [ "$(printf '%s' "$status" | jsonfilter -e '@.up')" = true ] || continue
- [ -n "$(printf '%s' "$status" | jsonfilter -e '@["ipv4-address"][0].address')" ] || continue
- # An empty bridge can have an IP even when the Ethernet driver failed.
- [ -e /sys/class/net/br-lan/brif/lan1 ] && [ -e /sys/class/net/br-lan/brif/lan2 ] && [ -e /sys/class/net/br-lan/brif/lan3 ] || continue
- pidof uhttpd >/dev/null && pidof dropbear >/dev/null || continue
- # Readiness means local management services are up, not an external reachability test.
+ [ "$(cat "$MARKER" 2>/dev/null)" = "$BOOT_ID" ] || continue
+ /usr/sbin/sr7420-usb-confirm --check || continue
  disk=$(cat /etc/sr7420-usb-disk 2>/dev/null) || continue
  case "$disk" in sd[a-z]) :;; *) continue;; esac
  mkdir -p /boot
  mount -t ext4 "/dev/${disk}1" /boot || continue
+ printf '%s\n' "$BOOT_ID" > /boot/boot-ready
  rm -f /boot/boot-pending
- date -u > /boot/boot-ready
  sync; umount /boot
- printf 'READY after %s seconds\n' "$n" >>/boot-state/stages.log
+ printf 'READY externally confirmed after %s seconds boot=%s\n' "$n" "$BOOT_ID" >>/boot-state/stages.log
  exit 0
 done
-printf 'FAILED: management readiness deadline\n' >>/boot-state/stages.log
+printf 'FAILED: 120-second external management confirmation deadline boot=%s\n' "$BOOT_ID" >>/boot-state/stages.log
 sync
-# A normal reboot returns through the original bootloader and stock system.
 reboot -f
 sleep 5
 echo b >/proc/sysrq-trigger

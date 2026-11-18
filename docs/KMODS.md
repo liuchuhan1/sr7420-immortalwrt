@@ -1,6 +1,6 @@
 # SR7420 模块构建结果
 
-日期：2026-11-18。内核 ABI：`6.18.60~b608e4c72ecf314fc4035d48ca497c9f-r1`。
+日期：2026-11-18。内核 ABI：`6.18.60~2b497291254683b6ce56b38338fafb7e-r1`。
 
 请求 1512 项，目标依赖求解选中 1109 项，全部产生 APK，缺包 0；403 项未选中。这不是“所有平台的每个驱动都支持 SR7420”。
 
@@ -439,4 +439,4 @@
 
 `all-kmods44-report.json` 记录构建产出的原始 APK；软件源重签后文件字节会变化，已发布 APK 的大小和 SHA256 以同目录 `manifest.json` 为准。两者的 kernel ABI 和包名必须一致。
 
-主要证据：`reports/all-kmods44-report.json`、`reports/kernel-files-final44.json`、`reports/module-audit-final44.json`、`reports/feed-privacy-final44.json`。
+主要证据：`reports/r2/all-kmods44-report.json`、`reports/r2/kernel-files-final44.json`、`reports/r2/module-audit-final44.json`、`reports/r2/feed-privacy-final44.json`。

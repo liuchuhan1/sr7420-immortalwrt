@@ -3,7 +3,7 @@
   "release": "development",
   "publishable_image": false,
   "all_kmods_compiled": true,
-  "usb_lan_verified": false,
+  "usb_lan_verified": true,
   "single_web_upload_verified": false,
   "cold_boot_verified": false,
   "smp_verified": false,
@@ -36,9 +36,9 @@
     }
   ],
   "blockers": [
-    "Last USB kernel boot did not restore Ethernet",
-    "Vendor config upload only proves maintenance access",
-    "Vendor firmware requires a verified accepted installer format"
+    "Vendor firmware upload requires a verified accepted installer format",
+    "Vendor persistent boot hook and unattended rollback flow are not yet verified",
+    "SMP and independent switch cold boot remain incomplete"
   ],
   "build_host_available": true,
   "source_privacy_scan_passed": true,
@@ -53,12 +53,20 @@
   "selected_kmods": 1109,
   "packaged_kmods": 1109,
   "unselected_kmods": 403,
-  "kernel_abi": "6.18.60~b608e4c72ecf314fc3955d48ca497c9f-r1",
+  "kernel_abi": "6.18.60~2b497291254683b6ce56b38338fafb7e-r1",
   "kernel_module_audit_passed": true,
   "signed_feed_generated": true,
   "usb_bundle_packaged": true,
   "usb_bundle_privacy_passed": true,
   "usb_artifact_verification_passed": true,
-  "usb_bundle_release_tag": "usb44-dev-20261118",
-  "source_privacy_scan_state": "passed"
+  "usb_bundle_release_tag": "usb44-r2-20261118",
+  "source_privacy_scan_state": "passed",
+  "generation": "r2",
+  "usb_dhcp_verified": true,
+  "usb_ssh_verified": true,
+  "luci_authenticated_verified": true,
+  "repackaged_release_hardware_retest": false,
+  "usb_running_r2_hardware_verified": true,
+  "kmod_repository": "sr7420-kmods-r2",
+  "repository_apk_update_verified": true
 }

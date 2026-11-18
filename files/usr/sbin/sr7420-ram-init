@@ -1,6 +1,8 @@
 #!/bin/sh
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-export INITRAMFS=1
+# The root is already a writable USB ext4 filesystem, not a RAM recovery root.
+unset INITRAMFS
+export SR7420_USB_ROOT=1
 mount -t proc proc /proc 2>/dev/null || true
 mount -t sysfs sysfs /sys 2>/dev/null || true
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
@@ -8,17 +10,37 @@ mkdir -p /boot-state
 log() { echo "<3>SR7420_USB44: $*" >/dev/kmsg; printf '%s %s\n' "$(cut -d' ' -f1 /proc/uptime)" "$*" >>/boot-state/stages.log; }
 log 'ENTER_ROOT'
 # Capture startup messages on the USB root before procd takes over.
-/bin/busybox dmesg -w >>/boot-state/kernel.log 2>&1 &
+# The configured BusyBox has no dmesg follow mode; keep a bounded snapshot.
+(n=0; while :; do
+ /bin/busybox dmesg >/boot-state/kernel.log.next 2>&1
+ mv /boot-state/kernel.log.next /boot-state/kernel.log
+ if [ $((n % 5)) = 0 ]; then
+  /bin/busybox ps >/boot-state/processes.log 2>&1
+  ip address show >/boot-state/network.log 2>&1
+  ip route show >>/boot-state/network.log 2>&1
+  cat /proc/mounts /proc/modules >/boot-state/system-state.log
+  [ ! -S /var/run/ubus/ubus.sock ] || ubus -t 2 call network.interface.lan status >/boot-state/lan-status.log 2>&1
+  [ ! -f /tmp/sr7420-radio.log ] || cp /tmp/sr7420-radio.log /boot-state/radio.log
+ fi
+ n=$((n+1)); sleep 2
+done) &
 /usr/sbin/sr7420-boot-guard >>/boot-state/guard.log 2>&1 &
 reject=0
 for f in /sys/class/mtd/mtd[0-9]*/flags; do
  [ -f "$f" ] || continue
- flags=$(cat "$f"); [ $((flags & 1024)) -eq 0 ] || reject=1
+ flags=$(cat "$f")
+ printf '%s flags=%s\n' "$f" "$flags" >>/boot-state/hardware-guards.log
+ [ $((flags & 1024)) -eq 0 ] || { log "WRITABLE_FLASH_REJECTED $f flags=$flags"; reject=1; }
 done
-/usr/sbin/quiesce-check >/dev/kmsg 2>&1 || reject=1
+/usr/sbin/quiesce-check >/boot-state/handover.log 2>&1
+rc=$?
+cat /boot-state/handover.log >/dev/kmsg
+[ "$rc" = 0 ] || { log "HANDOVER_CHECK_FAILED rc=$rc"; reject=1; }
 if [ "$reject" != 0 ]; then
- log FLASH_OR_PCIE_GUARD_REJECTED; sync; reboot -f
+ log FLASH_OR_PCIE_GUARD_REJECTED
+ /bin/busybox dmesg >/boot-state/kernel.log
+ sync; reboot -f
  while :; do sleep 1; done
 fi
 log EXEC_STANDARD_INIT
-exec /sbin/init
+exec /sbin/init >/boot-state/init-console.log 2>&1

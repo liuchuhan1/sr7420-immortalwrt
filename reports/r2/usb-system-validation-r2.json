@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-18",
+  "scope": "Running r2 USB system before release repackaging",
+  "usb_rootfs_type": "ext4",
+  "external_dhcp_verified": true,
+  "ssh_verified": true,
+  "luci_authenticated_login_verified": true,
+  "luci_network_configuration_permission_verified": true,
+  "radios_up": {
+    "radio0": true,
+    "radio1": true
+  },
+  "external_boot_confirmation_returncode": 0,
+  "persistent_beyond_rollback_deadline_verified": true,
+  "new_repackaged_release_reboot_tested": false,
+  "wifi_client_association_or_throughput_verified": false,
+  "smp_verified": false,
+  "independent_switch_cold_boot_verified": false,
+  "oem_upload_or_persistent_hook_verified": false,
+  "private_identifiers_in_report": false
+}

@@ -11,7 +11,7 @@ case "$0" in */*) SELF_BASE=${0%/*};; *) SELF_BASE=.;; esac
 SELF_DIR=$(CDPATH= cd "$SELF_BASE" && pwd)
 CMD=${1:-install}; [ $# -eq 0 ] || shift
 DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 WORK_MOUNTED=0
-WORK= BM= RM= LOCKED=0
+WORK= BM= RM= LOCKED=0 KERNEL_LOADED_BY_US=0
 log() { printf '%s\n' "SR7420-USB: $*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 usage() {
@@ -57,6 +57,7 @@ case "$CMD" in detect|install|verify|boot) :;; -h|--help|help) usage; exit 0;; *
 [ -r /proc/self/mountinfo ] || die 'mountinfo is required'
 cleanup() {
  set +e
+ if [ "$KERNEL_LOADED_BY_US" = 1 ]; then "$STAGE/kexec" -c -u >/dev/null 2>&1; fi
  [ -z "$RM" ] || umount "$RM" 2>/dev/null
  [ -z "$BM" ] || umount "$BM" 2>/dev/null
  # WORK is a new PID-named directory, never supplied by users.
@@ -161,9 +162,11 @@ probe_installed() {
  mount -t ext4 -o ro,noload "${DEV}1" "$WORK/boot" 2>/dev/null || return 1
  BM=$WORK/boot
  [ "$(cat "$BM/release-id" 2>/dev/null)" = "$RELEASE" ] || return 1
+ [ "$(cat "$BM/bundle-sha256" 2>/dev/null)" = "${WANT_SHA:-$DEFAULT_SHA}" ] || return 1
  [ "$(cat "$BM/usb-serial" 2>/dev/null)" = "$ACTUAL_SERIAL" ] || return 1
  verify_manifest "$BM" "$BM/boot.sha256" || return 1
  verify_manifest "$BM" "$BM/device.sha256" || return 1
+ [ -x "$BM/kexec" ] && [ -x "$BM/pci-quiesce" ] || return 1
  mount -t ext4 -o ro,noload "${DEV}2" "$WORK/root" 2>/dev/null || return 1
  RM=$WORK/root
  [ "$(cat "$RM/etc/sr7420-usb-release" 2>/dev/null)" = "$RELEASE" ] || return 1
@@ -223,7 +226,13 @@ if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
  tool mke2fs -V
  # Validate per-device stock inputs and construct a local DTB before erasing USB.
  [ "$(uname -r)" = 5.4.196 ] || die 'automatic stock-data import requires validated stock kernel'
- tr -d '\000' </proc/device-tree/model | grep -q SR7420 || die 'not an SR7420'
+ # Stock SR7420 identifies its SoC board as ZTE 133, not its retail name.
+ stock_model=$(tr -d '\000\r\n' </proc/device-tree/model)
+ stock_compat=$(tr '\000' '\n' </proc/device-tree/compatible)
+ [ "$stock_model" = 'ZTE 133' ] && printf '%s\n' "$stock_compat" | grep -q '^zte,133$' || die 'unsupported stock board identity'
+ for input in amss.bin m3.bin bdwlan.b01 bdwlan.b02 caldata_0.bin caldata_1.bin fw_ini_cfg.bin; do
+  [ -s "/lib/firmware/qcn9224/$input" ] || die "missing SR7420 radio input: $input"
+ done
  mkdir "$WORK/device-firmware"
  cp "$PAYLOAD/boot/board-template.dtb" "$WORK/device-board.dtb"
  "$PAYLOAD/stock-import" /lib/firmware/qcn9224 "$WORK/device-firmware" "$WORK/device-board.dtb" /sys/class/net/eth0/address
@@ -264,6 +273,7 @@ if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
  printf '%s\n' "$ACTUAL_SERIAL" >"$RM/etc/sr7420-usb-serial"
  printf '%s\n' "$ACTUAL_SERIAL" >"$BM/usb-serial"
  printf '%s\n' "$RELEASE" >"$BM/release-id"
+ printf '%s\n' "$WANT_SHA" >"$BM/bundle-sha256"
  sync
  unmount_ours
  probe_installed || die 'post-install remount verification failed'
@@ -286,13 +296,21 @@ mkdir -m 700 "$STAGE"
 cp -a "$BM/." "$STAGE/"
 verify_manifest "$STAGE" "$STAGE/boot.sha256" || die 'loader-stage checksum mismatch'
 verify_manifest "$STAGE" "$STAGE/device.sha256" || die 'device DTB checksum mismatch' 
+[ -x "$STAGE/kexec" ] && [ -x "$STAGE/pci-quiesce" ] || die 'loader-stage tools are not executable'
 CMDLINE="console=ttyAMA0,115200n8 earlycon=sr7420ram,mmio,0xb52f0000 keep_bootcon loglevel=6 nosmp panic=15 sr7420_usb_serial=$ACTUAL_SERIAL"
 "$STAGE/kexec" -c -l "$STAGE/Image" --dtb="$STAGE/board.dtb" --append="$CMDLINE"
 [ "$(cat /sys/kernel/kexec_loaded)" = 1 ] || die 'kexec did not load'
+KERNEL_LOADED_BY_US=1
 log 'USB kernel and DTB loaded into RAM'
-[ "$LOAD_ONLY" = 0 ] || exit 0
-mount -o remount,rw "$BM" || die 'cannot mark USB boot as pending'
+if [ "$LOAD_ONLY" = 1 ]; then KERNEL_LOADED_BY_US=0; exit 0; fi
+# Stock BusyBox can report a successful remount while retaining ro,noload.
+umount "$BM" || die 'cannot close read-only boot probe'
+BM=
+mount -t ext4 -o rw "${DEV}1" "$WORK/boot" || die 'cannot open boot partition for pending state'
+BM=$WORK/boot
+[ "$(cat "$BM/usb-serial")" = "$ACTUAL_SERIAL" ] || die 'boot partition identity changed'
 printf '%s\n' "$RELEASE" >"$BM/boot-pending"
+[ "$(cat "$BM/boot-pending")" = "$RELEASE" ] || die 'pending state read-back failed'
 sync
 unmount_ours
 # Tested stock WLAN teardown, with an independent old-kernel recovery deadline.

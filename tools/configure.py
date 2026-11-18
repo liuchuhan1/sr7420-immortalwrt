@@ -2,6 +2,7 @@
 """Overlay the SR7420 port onto the pinned, otherwise clean ImmortalWrt tree."""
 import argparse,json,os,shutil,subprocess,tarfile,io
 from pathlib import Path
+from luci_radio_labels import patch_file, patch_header_file
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--topdir',type=Path,required=True)
 p.add_argument('--backup',type=Path,required=True)
@@ -25,6 +26,8 @@ for n in json.loads((root/'config/remove-inherited.json').read_text()):
  if f.is_dir():shutil.rmtree(f)
  elif f.exists():f.unlink()
 shutil.copytree(root/'overlay',s,dirs_exist_ok=True)
+patch_file(s/'feeds/luci/modules/luci-base/htdocs/luci-static/resources/network.js')
+patch_header_file(s/'feeds/luci/modules/luci-base/ucode/template/header.ut')
 shutil.copytree(root/'files',s/'files',symlinks=True)
 for f in (s/'files').rglob('*'):
  if f.is_file() and (f.read_bytes().startswith(b'#!/') or '/etc/init.d/' in f.as_posix()):f.chmod(0o755)

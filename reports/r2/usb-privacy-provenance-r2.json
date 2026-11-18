@@ -1,0 +1,50 @@
+{
+  "passed": true,
+  "private_values_in_report": false,
+  "proofs": [
+    {
+      "artifact": "payload/boot/Image",
+      "sha256": "18f5cc293c1cd8520aafb53ce8eecb925e21c9e8463cab37fdd5e7f5b3350e21",
+      "source": {
+        "path": "net/ipv4/arp.c",
+        "source_sha256": "9a769c3f67dd9297c1c44f09136ba9eed1ae4ca442b521f7ce9362951a5cda28",
+        "embedded_bootstrap_verified": true
+      },
+      "classification": "upstream_public_constant"
+    },
+    {
+      "artifact": "rootfs/www/luci-static/resources/network.js",
+      "sha256": "dbbbc0ce240c463fbbdb35465db4c36ccd061cfbad673c5917d2f664e7c3e41f",
+      "source": {
+        "commit": "d438535d5d524c6fbd2863d507d6268df8af1e09",
+        "path": "modules/luci-base/htdocs/luci-static/resources/network.js",
+        "label_patch_exactly_verified": true
+      },
+      "classification": "upstream_public_constant"
+    },
+    {
+      "artifact": "sr7420-usb.sh",
+      "sha256": "f8db7ecfc4f5ceb5f6b8369a7e009b3abb652529bb00971c36db5d7d60a32054",
+      "source": {
+        "purpose": "public r2 release or signed module feed"
+      },
+      "classification": "public_repository_url"
+    },
+    {
+      "artifact": "bundle-report.json",
+      "sha256": "4577eb0e4d48f1f608eb129716bb0ec4dcd777422f7f8b575192397e6cc96bc2",
+      "source": {
+        "purpose": "public r2 release or signed module feed"
+      },
+      "classification": "public_repository_url"
+    },
+    {
+      "artifact": "rootfs/etc/apk/repositories.d/sr7420.list",
+      "sha256": "096ce9e2c663e037e7e55da17fa6f61312c5a4da34bd15777f82b886f11a1b1c",
+      "source": {
+        "purpose": "public r2 release or signed module feed"
+      },
+      "classification": "public_repository_url"
+    }
+  ]
+}

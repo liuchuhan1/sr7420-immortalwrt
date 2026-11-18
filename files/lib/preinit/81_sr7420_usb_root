@@ -1,0 +1,22 @@
+#!/bin/sh
+# Keep normal ext4/preinit semantics without probing the preserved OEM flash.
+sr7420_usb_root_preinit() {
+ [ "${SR7420_USB_ROOT:-}" = 1 ] || return 0
+ local disk func kept=
+ disk=$(cat /etc/sr7420-usb-disk) || return 1
+ case "$disk" in sd[a-z]) :;; *) return 1;; esac
+ [ "$(cat /etc/sr7420-usb-release)" = sr7420-usb44 ] || return 1
+ awk -v dev="/dev/${disk}2" '$1==dev && $2=="/" && $3=="ext4" && $4 ~ /(^|,)rw(,|$)/ {ok=1} END {exit !ok}' /proc/mounts || return 1
+ # 80_mount_root has registered its hook; retain every other preinit hook.
+ while boot_hook_shift preinit_main func; do
+  [ "$func" = do_mount_root ] || kept="$kept $func"
+ done
+ for func in $kept; do boot_hook_add preinit_main "$func"; done
+ printf 'USB_EXT4_PREINIT flash-root-probe-skipped\n' >>/boot-state/stages.log
+}
+if ! sr7420_usb_root_preinit; then
+ echo 'SR7420: invalid USB root; refusing OEM flash-root discovery' >/dev/kmsg
+ sync
+ reboot -f
+ while :; do sleep 1; done
+fi

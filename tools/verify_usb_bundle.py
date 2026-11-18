@@ -2,20 +2,26 @@
 """Verify actual USB release archives without booting or writing a device."""
 import argparse, hashlib, io, json, posixpath, re, stat, struct, subprocess, tarfile, tempfile
 from pathlib import Path, PurePosixPath
+from luci_radio_labels import INSERT as RADIO_LABEL_INSERT, ASSET_SUFFIX
 from build_usb_bundle import verify_accounts
 from usb_artifacts import canonical, module_info, sha256
 
 
-def contents(data):
+def contents(data, *, executables=()):
     result = {}
+    required, checked = set(executables), set()
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         for item in archive:
             name = PurePosixPath(item.name)
             assert not name.is_absolute() and '..' not in name.parts and item.name not in result
             assert item.isfile() or item.isdir() or item.issym()
             assert item.uid == item.gid == 0 and item.uname == item.gname == '' and item.mtime == 0
+            if item.name in required:
+                assert item.isfile() and item.mode & stat.S_IXUSR, ('Archive member not owner-executable', item.name)
+                checked.add(item.name)
             if item.isfile(): result[item.name] = archive.extractfile(item).read()
             elif item.issym(): result[item.name] = ('link', item.linkname)
+    assert checked == required, ('Missing executable archive members', sorted(required - checked))
     return result
 
 
@@ -83,14 +89,18 @@ def main():
     archive = a.output / 'sr7420-usb44-offline.tar.gz'
     launcher = a.output / 'sr7420-usb44-launcher.tar.gz'
     assert sha256(archive) == report['bundle_sha256'] and sha256(launcher) == report['launcher_sha256']
-    payload, launch = contents(archive.read_bytes()), contents(launcher.read_bytes())
+    payload = contents(archive.read_bytes(), executables=('boot/kexec', 'boot/pci-quiesce'))
+    launch = contents(launcher.read_bytes(), executables=('sr7420-usb.sh', 'sha256'))
     counts = {'payload': manifest(payload, payload['bundle.sha256']),
               'boot': manifest(payload, payload['boot/boot.sha256'], 'boot/'),
               'launcher': manifest(launch, launch['launcher.sha256'])}
-    root = contents(payload['rootfs.tar.gz'])
+    root = contents(payload['rootfs.tar.gz'], executables=('usr/sbin/sr7420-ram-init',
+                    'usr/sbin/sr7420-boot-guard', 'usr/sbin/sr7420-usb-confirm', 'usr/sbin/sr7420-radio-start'))
     counts['root'] = manifest(root, payload['root.sha256'])
-    for name in ['etc/config/network', 'etc/config/wireless', 'usr/sbin/sr7420-ram-init', 'usr/sbin/sr7420-boot-guard']:
+    for name in ['etc/config/network', 'etc/config/wireless', 'usr/sbin/sr7420-ram-init', 'usr/sbin/sr7420-boot-guard', 'usr/sbin/sr7420-usb-confirm', 'lib/preinit/81_sr7420_usb_root']:
         assert root[name] == (repo / 'files' / name).read_bytes(), name
+    assert RADIO_LABEL_INSERT.encode() in root['www/luci-static/resources/network.js']
+    assert ASSET_SUFFIX.encode() in root['usr/share/ucode/luci/template/header.ut']
     with tempfile.TemporaryDirectory(prefix='sr7420-verify-usb-') as temp:
         temp = Path(temp); (temp / 'etc').mkdir()
         for name in ['passwd', 'shadow']: (temp / 'etc' / name).write_bytes(root['etc/' + name])
@@ -103,10 +113,15 @@ def main():
         cpio = (a.output / 'bootstrap.cpio').read_bytes(); bootstrap = parse_cpio(cpio)
         assert bootstrap['init'][1] == (repo / 'installer/init-usb.sh').read_bytes()
         assert stat.S_ISCHR(bootstrap['dev/console'][0])
+        assert bootstrap['sbin/insmod'][1] == b'kmodloader' and stat.S_ISLNK(bootstrap['sbin/insmod'][0])
+        aarch64(bootstrap['sbin/kmodloader'][1], executable=True)
+        assert stat.S_ISDIR(bootstrap['lib/modules/' + report['kernel_release']][0])
+        requested_modules = set()
         loaded = set(builtins); module_count = 0
         for line in bootstrap['load-usb.sh'][1].decode().splitlines():
-            if not line.startswith('/bin/busybox insmod '): continue
-            name = line.split()[2].lstrip('/'); data = bootstrap[name][1]; aarch64(data)
+            match = re.search(r'/sbin/insmod (/lib/modules/[A-Za-z0-9_.+-]+/[A-Za-z0-9_.+-]+\.ko)', line)
+            if not match: continue
+            name = match.group(1).lstrip('/'); requested_modules.add(name); data = bootstrap[name][1]; aarch64(data)
             target = temp / Path(name).name; target.write_bytes(data); info = module_info(target)
             assert info['vermagic'].split()[0] == report['kernel_release']
             dependencies = {canonical(x) for x in info.get('depends', '').split(',') if x}
@@ -114,12 +129,13 @@ def main():
             loaded.add(canonical(info.get('name', target.stem))); module_count += 1
         required = {'usbcore','phy_generic','dwc3','dwc3_generic_plat','xhci_hcd','xhci_plat_hcd','usb_storage','scsi_mod','sd_mod','ext4'}
         assert required <= loaded
+        assert requested_modules == {n for n in bootstrap if n.endswith('.ko')}
     image = payload['boot/Image']; assert image[56:60] == b'ARMd' and image.count(cpio) == 1
     assert hashlib.sha256(image).hexdigest() == report['image_sha256']
     aarch64(payload['boot/kexec'], executable=True, static=True)
     assert hashlib.sha256(payload['boot/kexec']).hexdigest() == report['kexec_sha256']
     assert root['etc/apk/keys/public-key.pem'] == a.repository_key.read_bytes()
-    assert root['etc/apk/repositories.d/sr7420.list'].decode().strip() == report['kmod_index_url']
+    assert root['etc/apk/repositories.d/sr7420.list'] == (report['kmod_index_url'] + '\n').encode(), 'Repository list must be the exact URL with LF newline'
     assert report['kernel_abi'] in report['kmod_index_url']
     assert b'__BUNDLE_' not in launch['sr7420-usb.sh'] and payload['release-id'] == b'sr7420-usb44\n'
     assert launch['sr7420-usb.sh'] == (a.output / 'sr7420-usb.sh').read_bytes()

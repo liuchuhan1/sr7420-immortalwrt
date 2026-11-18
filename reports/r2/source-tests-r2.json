@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "tests": [
+    {
+      "file": "test_accounts.py",
+      "rc": 0
+    },
+    {
+      "file": "test_apk_metadata.py",
+      "rc": 0
+    },
+    {
+      "file": "test_artifacts.py",
+      "rc": 0
+    },
+    {
+      "file": "test_luci_radio_labels.py",
+      "rc": 0
+    },
+    {
+      "file": "test_privacy_scan.py",
+      "rc": 0
+    },
+    {
+      "file": "test_runtime.py",
+      "rc": 0
+    },
+    {
+      "file": "test_usb_permissions.py",
+      "rc": 0
+    },
+    {
+      "file": "test_usb_preinit.py",
+      "rc": 0
+    }
+  ],
+  "privacy": {
+    "passed": true,
+    "objects_scanned": 407,
+    "findings": []
+  }
+}
