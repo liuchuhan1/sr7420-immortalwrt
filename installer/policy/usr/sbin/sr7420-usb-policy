@@ -1,0 +1,167 @@
+#!/bin/sh
+# Opt-in confirmation policy for an already installed USB system.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+RELEASE=sr7420-usb44
+MANIFEST=etc/sr7420-policy.sha256
+MARKER=/tmp/sr7420-usb-management-confirmed
+STAGES=/boot-state/stages.log
+log() { printf '%s\n' "SR7420-STABLE: $*"; }
+fail() { log "ERROR: $*" >&2; exit 1; }
+read_state() { [ -f "$1" ] && [ ! -L "$1" ] && cat "$1"; }
+file_hash() (
+ [ -f "$2" ] && [ -s "$2" ] && [ ! -L "$2" ] || exit 1
+ digest=$("$1" "$2") || exit 1
+ digest=${digest%% *}
+ case "$digest" in *[!0-9a-f]*) exit 1;; esac
+ [ "${#digest}" -eq 64 ] || exit 1
+ printf '%s\n' "$digest"
+)
+verify_policy_files() (
+ root=${1%/}
+ expected=$(read_state "$root/$MANIFEST") || exit 1
+ actual=$(
+  for name in etc/init.d/sr7420-usb-policy usr/sbin/sr7420-usb-policy; do
+   hash=$(file_hash sha256sum "$root/$name") || exit 1
+   printf '%s  %s\n' "$hash" "$name"
+  done
+ ) || exit 1
+ [ "$expected" = "$actual" ]
+)
+
+# Hash the same inputs when installing and when deciding whether to trust a boot.
+fingerprint() (
+ boot=$1 root=${2%/} hasher=$3 input=$4
+ {
+  printf '%s\n' sr7420-usb-stable-v1
+  for path in "$boot/release-id" "$boot/usb-serial" "$boot/bundle-sha256" \
+      "$boot/boot.sha256" "$boot/device.sha256" "$boot/root.sha256" \
+      "$root/$MANIFEST" "$root/etc/sr7420-device.sha256"; do
+   file_hash "$hasher" "$path" || exit 1
+  done
+ } >"$input" || exit 1
+ file_hash "$hasher" "$input"
+)
+
+cmd=${1:-status}
+case "$cmd" in
+ fingerprint) [ "$#" -eq 5 ] || fail 'internal fingerprint arguments'; fingerprint "$2" "$3" "$4" "$5"; exit;;
+ watch|status|disable) [ "$#" -le 1 ] || fail 'unexpected argument';;
+ *) fail 'usage: sr7420-usb-policy [status|disable]';;
+esac
+[ "$(cat /etc/sr7420-usb-release)" = "$RELEASE" ] || fail 'not a USB44 system'
+disk=$(cat /etc/sr7420-usb-disk)
+case "$disk" in sd[a-z]) :;; *) fail 'invalid USB disk';; esac
+awk -v dev="/dev/${disk}2" '$1==dev && $2=="/" && $3=="ext4" && $4 ~ /(^|,)rw(,|$)/ {ok=1} END {exit !ok}' /proc/mounts || fail 'USB root must be writable ext4'
+serial=$(cat /etc/sr7420-usb-serial)
+[ -n "$serial" ] || fail 'USB serial missing'
+RUN=/tmp/sr7420-usb-policy.$$
+mkdir -m 700 "$RUN" || fail 'cannot create private policy workspace'
+MOUNT_DIR=$RUN/boot
+BOOT=$MOUNT_DIR
+MOUNTED=0
+CONFIRM_STAGE=
+close_boot() {
+ if [ "$MOUNTED" = 1 ]; then
+  umount "$MOUNT_DIR" || return 1
+  MOUNTED=0
+ fi
+}
+cleanup() {
+ if [ -n "$CONFIRM_STAGE" ]; then rm -f "$CONFIRM_STAGE/receipt"; rmdir "$CONFIRM_STAGE"; fi
+ close_boot || log 'cannot unmount policy workspace' >&2
+ rm -f "$RUN/identity" "$RUN/management-confirmed"
+ rmdir "$MOUNT_DIR" "$RUN" 2>/dev/null || :
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+mkdir "$MOUNT_DIR"
+open_boot() {
+ mount -t ext4 -o rw "/dev/${disk}1" "$MOUNT_DIR" || fail 'cannot mount USB boot partition'
+ MOUNTED=1
+ [ "$(read_state "$BOOT/release-id")" = "$RELEASE" ] || fail 'boot release mismatch'
+ [ "$(read_state "$BOOT/usb-serial")" = "$serial" ] || fail 'USB identity mismatch'
+}
+verify_request() {
+ [ "$(read_state "$BOOT/stable-request" || :)" = "$identity" ] || return 1
+ current=$(fingerprint "$BOOT" / sha256sum "$RUN/identity") || return 1
+ [ "$current" = "$identity" ]
+}
+open_boot
+if [ "$cmd" = disable ]; then
+ rm -f "$BOOT/stable-request" "$BOOT/stable-confirmed"
+ sync
+ log 'stable=disabled; external confirmation is required next boot'
+ exit 0
+fi
+request=$(read_state "$BOOT/stable-request" || :)
+if [ -z "$request" ]; then
+ [ "$cmd" != status ] || log 'stable=disabled'
+ exit 0
+fi
+verify_policy_files / || fail 'policy manifest verification failed'
+identity=$(fingerprint "$BOOT" / sha256sum "$RUN/identity") || fail 'cannot verify policy identity'
+[ "$request" = "$identity" ] || fail 'USB or runtime changed; external confirmation is required'
+confirmed=$(read_state "$BOOT/stable-confirmed" || :)
+if [ "$cmd" = status ]; then
+ if [ "$confirmed" = "$identity" ]; then log 'stable=confirmed'
+ else log 'stable=pending-first-external-confirmation'; fi
+ exit 0
+fi
+close_boot || fail 'cannot unmount USB boot partition'
+
+boot_id=$(cat /proc/sys/kernel/random/boot_id)
+[ -n "$boot_id" ] || fail 'missing boot id'
+n=0
+limit=125
+[ "$confirmed" != "$identity" ] || limit=110
+while [ "$n" -lt "$limit" ]; do
+ sleep 1; n=$((n+1))
+ if [ "$confirmed" = "$identity" ]; then
+  # The existing guard must still independently pass its own readiness check.
+  /usr/sbin/sr7420-usb-confirm --check >/dev/null 2>&1 || continue
+  open_boot
+  verify_request || exit 0
+  [ "$(read_state "$BOOT/stable-confirmed" || :)" = "$identity" ] || exit 0
+  [ "$(read_state "$BOOT/boot-pending" || :)" = "$RELEASE" ] || exit 0
+  close_boot || fail 'cannot unmount USB boot partition'
+  [ ! -d "$MARKER" ] && [ ! -L "$MARKER" ] || fail 'invalid management marker'
+  printf '%s\n' "$boot_id" >"$RUN/management-confirmed"
+  mv -f "$RUN/management-confirmed" "$MARKER"
+  printf 'STABLE_LOCAL_READY boot=%s\n' "$boot_id" >>"$STAGES"
+  exit 0
+ fi
+ # For a new request, local readiness never writes the management marker.
+ # Require both the SSH confirmation and the original guard's commit receipt.
+ [ "$(read_state "$MARKER" || :)" = "$boot_id" ] || continue
+ awk -v id="boot=$boot_id" '
+  $1=="EXTERNAL_CONFIRM" && $2==id && $3 ~ /^peer=./ {external=1}
+  $1=="READY" && $2=="externally" && $3=="confirmed" && $NF==id {ready=1}
+  external && ready {exit}
+  END {exit !(external && ready)}
+ ' "$STAGES" 2>/dev/null || continue
+ open_boot
+ verify_request || exit 0
+ [ "$(read_state "$BOOT/boot-ready" || :)" = "$boot_id" ] || fail 'missing current guard receipt on USB boot partition'
+ [ ! -e "$BOOT/boot-pending" ] && [ ! -L "$BOOT/boot-pending" ] || fail 'guard did not clear the pending boot'
+ stage=$BOOT/.sr7420-stable-confirm.$$
+ mkdir -m 700 "$stage" || fail 'cannot stage stable confirmation'
+ CONFIRM_STAGE=$stage
+ printf '%s\n' "$identity" >"$stage/receipt"
+ [ "$(read_state "$BOOT/stable-request" || :)" = "$identity" ] || exit 0
+ if [ -d "$BOOT/stable-confirmed" ] || [ -L "$BOOT/stable-confirmed" ]; then
+  fail 'invalid stable confirmation file'
+ fi
+ mv -f "$stage/receipt" "$BOOT/stable-confirmed"
+ rmdir "$stage"; CONFIRM_STAGE=
+ sync
+ close_boot || fail 'cannot unmount USB boot partition'
+ printf 'STABLE_ARMED_AFTER_EXTERNAL_CONFIRM boot=%s\n' "$boot_id" >>"$STAGES"
+ log 'stable=confirmed'
+ exit 0
+done
+log 'no accepted confirmation before policy deadline; rollback guard unchanged'
+exit 1

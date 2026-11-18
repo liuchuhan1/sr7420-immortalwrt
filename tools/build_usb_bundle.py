@@ -3,6 +3,7 @@
 import argparse, json, os, re, shutil, subprocess, time
 from pathlib import Path
 from luci_radio_labels import patch_file, patch_header_file
+from stable_payload import stable_payload
 from usb_artifacts import (archive_tree, elf_runtime, manifest_tree, module_closure,
                            newc, run, sha256, write)
 
@@ -227,6 +228,11 @@ def main():
     shutil.copytree(tools / 'lib', launcher / 'tools/lib', symlinks=True)
     shutil.copy2(tools / 'bin/curl', launcher / 'tools/bin/curl')
     shutil.copy2(tools / 'ca-certificates.crt', launcher / 'tools/ca-certificates.crt')
+    for name, (data, mode) in stable_payload(repo).items():
+        target = launcher / 'policy' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(mode)
     for name in ['sr7420-usb-autostart.sh', 'sr7420-usb-disable.sh']:
         shutil.copy2(repo / 'installer' / name, launcher / name)
         (launcher / name).chmod(0o755)

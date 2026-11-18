@@ -10,15 +10,16 @@ DEFAULT_SHA=__BUNDLE_SHA256__
 case "$0" in */*) SELF_BASE=${0%/*};; *) SELF_BASE=.;; esac
 SELF_DIR=$(CDPATH= cd "$SELF_BASE" && pwd)
 CMD=${1:-install}; [ $# -eq 0 ] || shift
-DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 WORK_MOUNTED=0
-WORK= BM= RM= LOCKED=0 KERNEL_LOADED_BY_US=0
+DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 STABLE=0 WORK_MOUNTED=0
+WORK= BM= RM= POLICY_STAGE= REQUEST_STAGE= LOCKED=0 KERNEL_LOADED_BY_US=0
 log() { printf '%s\n' "SR7420-USB: $*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 usage() {
  cat <<'EOF'
 Usage:
   sh sr7420-usb.sh detect
-  sh sr7420-usb.sh install --device /dev/sda --serial SERIAL --erase [--offline FILE]
+  sh sr7420-usb.sh install --device /dev/sda --serial SERIAL --erase [--offline FILE] [--stable]
+  sh sr7420-usb.sh install --stable  # reuse a verified existing system; never erase
   sh sr7420-usb.sh install --serial SERIAL --erase --url HTTPS_URL --sha256 SHA256
   sh sr7420-usb.sh verify --device /dev/sda
   sh sr7420-usb.sh boot --device /dev/sda [--load-only]
@@ -31,6 +32,7 @@ Options:
   --serial SERIAL       Required identity match before any destructive operation.
   --boot                After installation, boot when running the stock kernel.
   --retry               Retry a previous failed USB boot; automatic retries are blocked.
+  --stable              Install only: request automatic readiness after one external confirmation.
 The default offline bundle is next to this script. An installed valid system is
 reused without formatting or downloading. Booting requires stock Linux 5.4.196.
 EOF
@@ -47,17 +49,30 @@ while [ $# -gt 0 ]; do
   --load-only) LOAD_ONLY=1; shift;;
   --boot) BOOT_AFTER=1; shift;;
   --retry) RETRY=1; shift;;
+  --stable) STABLE=1; shift;;
+  --autostart) die 'no supported stock startup hook; nothing changed';;
   -h|--help) usage; exit 0;;
   *) die "unknown option $1";;
  esac
 done
 case "$CMD" in detect|install|verify|boot) :;; -h|--help|help) usage; exit 0;; *) usage; exit 1;; esac
+[ "$STABLE" = 0 ] || [ "$CMD" = install ] || die '--stable requires install (no --erase needed on verified USB)'
 [ "$(id -u)" = 0 ] || die 'run as root'
+if [ "$STABLE" = 1 ]; then
+ [ "$(uname -r)" = 5.4.196 ] || die 'return to the validated stock system before enabling stable mode'
+ [ "$(tr -d '\000\r\n' </proc/device-tree/model)" = 'ZTE 133' ] || die 'unexpected stock board; USB unchanged'
+ [ "${WANT_SHA:-$DEFAULT_SHA}" = "$DEFAULT_SHA" ] || die '--stable requires the launcher default bundle identity'
+fi
 [ -d /sys/class/block ] || die 'sysfs is required'
 [ -r /proc/self/mountinfo ] || die 'mountinfo is required'
 cleanup() {
  set +e
  if [ "$KERNEL_LOADED_BY_US" = 1 ]; then "$STAGE/kexec" -c -u >/dev/null 2>&1; fi
+ if [ -n "$REQUEST_STAGE" ]; then rm -f "$REQUEST_STAGE/request"; rmdir "$REQUEST_STAGE"; fi
+ if [ -n "$POLICY_STAGE" ]; then
+  rm -f "$POLICY_STAGE/runtime" "$POLICY_STAGE/service" "$POLICY_STAGE/manifest"
+  rmdir "$POLICY_STAGE"
+ fi
  [ -z "$RM" ] || umount "$RM" 2>/dev/null
  [ -z "$BM" ] || umount "$BM" 2>/dev/null
  # WORK is a new PID-named directory, never supplied by users.
@@ -144,7 +159,7 @@ hash_file() { "$HASH_TOOL" "$1" | awk '{print $1}'; }
 verify_manifest() {
  base=$1; manifest=$2
  [ -s "$manifest" ] || return 1
- while read digest name extra; do
+ while read -r digest name extra || [ -n "$digest$name$extra" ]; do
   [ -z "${extra:-}" ] || return 1
   case "$digest" in *[!0-9a-f]*|'') return 1;; esac
   [ "${#digest}" -eq 64 ] || return 1
@@ -153,6 +168,13 @@ verify_manifest() {
   [ "$(hash_file "$base/$name")" = "$digest" ] || return 1
  done <"$manifest"
 }
+verify_policy_payload() {
+ [ "$(awk '{print $2}' "$SELF_DIR/policy/policy.sha256")" = "$(printf '%s\n' etc/init.d/sr7420-usb-policy usr/sbin/sr7420-usb-policy)" ] &&
+ verify_manifest "$SELF_DIR/policy" "$SELF_DIR/policy/policy.sha256"
+}
+if [ "$STABLE" = 1 ]; then
+ verify_policy_payload || die 'missing or invalid stable policy payload; USB unchanged'
+fi
 unmount_ours() {
  [ -z "$RM" ] || { umount "$RM"; RM=; }
  [ -z "$BM" ] || { umount "$BM"; BM=; }
@@ -278,6 +300,52 @@ if [ "$CMD" = install ] && [ "$INSTALLED" = 0 ]; then
  unmount_ours
  probe_installed || die 'post-install remount verification failed'
  INSTALLED=1; log 'installation complete; USB data and boot files verified'
+fi
+if [ "$STABLE" = 1 ]; then
+ [ "$INSTALLED" = 1 ] || die 'stable mode requires a verified installation'
+ unmount_ours
+ assert_not_mounted
+ [ "$(serial_of "$DISK")" = "$ACTUAL_SERIAL" ] || die 'USB identity changed'
+ mount -t ext4 -o rw "${DEV}1" "$WORK/boot"; BM=$WORK/boot
+ mount -t ext4 -o rw "${DEV}2" "$WORK/root"; RM=$WORK/root
+ [ "$(cat "$BM/usb-serial")" = "$ACTUAL_SERIAL" ] && [ "$(cat "$RM/etc/sr7420-usb-serial")" = "$ACTUAL_SERIAL" ] || die 'USB identity changed'
+ for path in usr usr/sbin etc etc/init.d etc/rc.d; do [ -d "$RM/$path" ] && [ ! -L "$RM/$path" ] || die 'unexpected policy destination'; done
+ for path in usr/sbin/sr7420-usb-policy etc/init.d/sr7420-usb-policy etc/sr7420-policy.sha256; do
+  [ ! -d "$RM/$path" ] && [ ! -L "$RM/$path" ] || die 'invalid policy destination'
+ done
+ target=$RM/etc/rc.d/S12sr7420-usb-policy
+ if [ -e "$target" ] || [ -L "$target" ]; then
+  [ -L "$target" ] && [ "$(readlink "$target")" = ../init.d/sr7420-usb-policy ] || die 'unmanaged policy service entry'
+ fi
+ stage=$RM/.sr7420-policy.$$
+ mkdir -m 700 "$stage" || die 'cannot stage policy on USB root'
+ POLICY_STAGE=$stage
+ cp "$SELF_DIR/policy/usr/sbin/sr7420-usb-policy" "$stage/runtime"
+ cp "$SELF_DIR/policy/etc/init.d/sr7420-usb-policy" "$stage/service"
+ cp "$SELF_DIR/policy/policy.sha256" "$stage/manifest"
+ chmod 755 "$stage/runtime" "$stage/service"
+ chmod 644 "$stage/manifest"
+ mv -f "$stage/runtime" "$RM/usr/sbin/sr7420-usb-policy"
+ mv -f "$stage/service" "$RM/etc/init.d/sr7420-usb-policy"
+ mv -f "$stage/manifest" "$RM/etc/sr7420-policy.sha256"
+ rmdir "$stage"; POLICY_STAGE=
+ verify_manifest "$RM" "$RM/etc/sr7420-policy.sha256" || die 'installed policy integrity check failed'
+ [ -L "$target" ] || ln -s ../init.d/sr7420-usb-policy "$target"
+ policy_id=$(sh "$RM/usr/sbin/sr7420-usb-policy" fingerprint "$BM" "$RM" "$HASH_TOOL" "$WORK/policy-identity") || die 'cannot bind stable mode to this USB/runtime'
+ [ ! -d "$BM/stable-request" ] && [ ! -L "$BM/stable-request" ] || die 'invalid stable request file'
+ [ ! -d "$BM/stable-confirmed" ] && [ ! -L "$BM/stable-confirmed" ] || die 'invalid stable confirmation file'
+ # Retain a confirmation only when reinstalling the exact same requested policy.
+ if [ "$(cat "$BM/stable-request" 2>/dev/null)" != "$policy_id" ]; then rm -f "$BM/stable-confirmed"; fi
+ stage=$BM/.sr7420-policy.$$
+ mkdir -m 700 "$stage" || die 'cannot stage policy request on USB boot partition'
+ REQUEST_STAGE=$stage
+ printf '%s\n' "$policy_id" >"$stage/request"
+ mv -f "$stage/request" "$BM/stable-request"
+ rmdir "$stage"; REQUEST_STAGE=
+ sync
+ unmount_ours
+ probe_installed || die 'USB verification after policy installation failed'
+ log 'stable requested; first successful boot still requires external confirmation unless already confirmed for this policy'
 fi
 if [ "$CMD" = install ] && [ "$BOOT_AFTER" = 0 ]; then
  log 'ready; invoke the boot command from the stock system to switch kernels'

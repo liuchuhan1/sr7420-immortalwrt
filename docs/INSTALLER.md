@@ -4,6 +4,8 @@
 
 **原厂 root shell 内的 GitHub 在线安装和手动切换已通过实机验收。原厂网页一次上传安装包和持久启动 hook 仍未实现；请勿把本仓库的文件改名为原厂 `.bin` 上传。**
 
+本文描述已发布的 r2。开发分支单独提供实验性 [`--stable` 增强启动器](USB-STABLE.md)，不改变原版的在线入口和启动确认流程。
+
 [下载 r2 Release](https://github.com/liuchuhan1/sr7420-immortalwrt/releases/tag/usb44-r2-20261118) · [一行安装](INSTALL-R2-ONE-LINE.sh) · [一行启动](BOOT-R2-ONE-LINE.sh) · [实测报告](../reports/r2/online-install-test-r2.json)
 
 ## 安装前
