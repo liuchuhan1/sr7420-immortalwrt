@@ -142,9 +142,9 @@ class USBStableInstall(unittest.TestCase):
         lines = [f'{hashlib.sha256((self.work / base / n).read_bytes()).hexdigest()}  {n}\n' for n in names]
         self.write(output, ''.join(lines).encode())
 
-    def run_installer(self, args=('install', '--stable'), expected=0):
+    def run_installer(self, args=('install', '--stable'), expected=0, input_text=None):
         result = subprocess.run([SHELL, './sr7420-usb.sh', *args], cwd=self.work,
-                                env=self.env, capture_output=True, text=True, timeout=30)
+                                env=self.env, input=input_text, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, expected, (result.stdout, result.stderr))
         self.assertFalse((self.work / 'unexpected').exists())
         self.assertFalse((self.work / 'tmp/sr7420-usb.lock').exists())
@@ -214,7 +214,7 @@ class USBStableInstall(unittest.TestCase):
     def autostart_fixture(self):
         for name, (payload, _) in autostart_payload(REPO).items():
             self.write('autostart/' + name, payload)
-        self.write('autostart/manage.sh', b'#!/bin/sh\nprintf "%s\\n" "$@" >./autostart-called\n')
+        self.write('autostart/manage.sh', b'#!/bin/sh\nprintf "%s\\n" "$@" >./autostart-called\nif [ -f ./capture-login ]; then cat >./autostart-login; fi\n')
         names = ['guest-config.sh', 'guest.sh', 'host.sh', 'manage.sh']
         self.manifest('autostart', 'autostart/autostart.sha256', names)
 
@@ -228,6 +228,29 @@ class USBStableInstall(unittest.TestCase):
         self.assertNotIn('-o rw', (self.work / 'mount-calls').read_text())
         self.assertFalse((self.work / 'boot/stable-request').exists())
         self.assertEqual((self.work / 'boot/boot-pending').read_text(), 'sr7420-usb44\n')
+
+    def test_autostart_accepts_credentials_as_parameters(self):
+        self.autostart_fixture()
+        self.write('capture-login', b'')
+        self.run_installer(('install', '--autostart', '--tnu', 'root', '--tnp', 'stock password'))
+        self.assertEqual((self.work / 'autostart-login').read_text(), 'root\nstock password\n')
+        self.assertNotIn('stock password', (self.work / 'autostart-called').read_text())
+
+    def test_autostart_retains_stdin_credentials(self):
+        self.autostart_fixture()
+        self.write('capture-login', b'')
+        self.run_installer(('install', '--autostart'), input_text='root\nstock password\n')
+        self.assertEqual((self.work / 'autostart-login').read_text(), 'root\nstock password\n')
+
+    def test_credential_parameters_require_a_pair_and_autostart(self):
+        self.autostart_fixture()
+        for args, message in [
+            (('install', '--autostart', '--tnu', 'root'), '--tnu and --tnp must be supplied together'),
+            (('install', '--autostart', '--tnp', 'secret'), '--tnu and --tnp must be supplied together'),
+            (('install', '--tnu', 'root', '--tnp', 'secret'), '--tnu/--tnp require install --autostart'),
+        ]:
+            self.assertIn(message, self.run_installer(args, expected=1))
+            self.assertFalse((self.work / 'autostart-called').exists())
 
     def test_autostart_and_stable_share_one_verified_usb(self):
         self.autostart_fixture()

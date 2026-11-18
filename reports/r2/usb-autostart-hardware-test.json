@@ -5,7 +5,8 @@
   "stock_kernel": "5.4.196",
   "usb_kernel": "6.18.60",
   "backend": "nativeC-loopback-telnet",
-  "launcher_sha256": "5184c4da3fa41ac9a4ebd107cec65ffe291af187257b5095dd5e1539adc9ab51",
+  "hardware_tested_launcher_sha256": "5184c4da3fa41ac9a4ebd107cec65ffe291af187257b5095dd5e1539adc9ab51",
+  "release_launcher_sha256": "2c6de484ed4ffe03d562258e1594d4dc829ed0b8aef3932a99c9cf1128c9f46d",
   "system_bundle_sha256": "0936aaac1e8b3762dda9a4114feb0f17d7b1e81017ec20d2d4cb5d6961460e71",
   "system_bundle_repacked": false,
   "initial_attempt": {
@@ -79,8 +80,10 @@
     "both_radios_up": true
   },
   "validation": {
-    "focused_offline_tests_passed": 27,
+    "focused_offline_tests_passed": 30,
+    "credential_input_modes_offline_tested": ["stdin-two-lines", "--tnu/--tnp"],
     "launcher_archive_privacy_scan_passed": true,
+    "release_launcher_hardware_retest": false,
     "reviewed_match": "Identical public GitHub download URL in the original launcher."
   },
   "limitations": {

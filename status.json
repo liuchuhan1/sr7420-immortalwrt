@@ -70,6 +70,9 @@
   "stock_usb_autostart": {
     "software_reboot_verified": true,
     "physical_power_cycle_verified": false,
+    "hardware_tested_launcher_sha256": "5184c4da3fa41ac9a4ebd107cec65ffe291af187257b5095dd5e1539adc9ab51",
+    "release_launcher_sha256": "2c6de484ed4ffe03d562258e1594d4dc829ed0b8aef3932a99c9cf1128c9f46d",
+    "credential_input_modes_offline_tested": ["stdin-two-lines", "--tnu/--tnp"],
     "report": "reports/r2/usb-autostart-hardware-test.json"
   },
   "kmod_repository": "sr7420-kmods-r2",

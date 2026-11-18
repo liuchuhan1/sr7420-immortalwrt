@@ -2,7 +2,7 @@
 
 这是 SR7420 的开发移植、补丁和 USB 系统切换工具源码。目前不提供可直接交给原厂升级页的刷机包。
 
-[下载 USB44 r2 实验预发布](https://github.com/liuchuhan1/sr7420-immortalwrt/releases/tag/usb44-r2-20261118) · [一行安装命令](docs/INSTALL-R2-ONE-LINE.sh) · [完整安装说明](docs/INSTALLER.md) · [r2 模块软件源](docs/REPOSITORIES.md)
+[下载 USB44 r2 实验预发布](https://github.com/liuchuhan1/sr7420-immortalwrt/releases/tag/usb44-r2-20261118) · [下载 stable/autostart 增强版](https://github.com/liuchuhan1/sr7420-immortalwrt/releases/tag/usb44-r2-stable-autostart-20261119) · [一行安装命令](docs/INSTALL-R2-ONE-LINE.sh) · [完整安装说明](docs/INSTALLER.md) · [r2 模块软件源](docs/REPOSITORIES.md)
 
 ## 快速开始：从原厂启动 U 盘系统
 
@@ -24,7 +24,7 @@
 
 开发分支提供独立的 [增强启动器](docs/USB-STABLE.md)。`--stable` 在首次 SSH 确认后启用后续自动确认；[`--autostart`](docs/USB-STABLE.md#单机自启) 负责从原厂开机后发起切换。原版一键入口不含这两个选项。
 
-## 当前状态（2026-11-18）
+## 当前状态（2026-11-19）
 
 | 项目 | 状态 |
 | --- | --- |

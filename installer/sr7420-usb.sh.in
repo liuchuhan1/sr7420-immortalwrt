@@ -10,9 +10,9 @@ DEFAULT_SHA=__BUNDLE_SHA256__
 case "$0" in */*) SELF_BASE=${0%/*};; *) SELF_BASE=.;; esac
 SELF_DIR=$(CDPATH= cd "$SELF_BASE" && pwd)
 CMD=${1:-install}; [ $# -eq 0 ] || shift
-DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 STABLE=0 AUTOSTART=0 WORK_MOUNTED=0
+DEV= SERIAL= OFFLINE= URL= WANT_SHA= TNU= TNP= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 STABLE=0 AUTOSTART=0 WORK_MOUNTED=0
 WORK= BM= RM= POLICY_STAGE= REQUEST_STAGE= LOCKED=0 KERNEL_LOADED_BY_US=0
-AUTO_PIN=
+AUTO_PIN= TNU_SET=0 TNP_SET=0
 log() { printf '%s\n' "SR7420-USB: $*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 usage() {
@@ -22,6 +22,7 @@ Usage:
   sh sr7420-usb.sh install --device /dev/sda --serial SERIAL --erase [--offline FILE] [--stable]
   sh sr7420-usb.sh install --stable  # reuse a verified existing system; never erase
   sh sr7420-usb.sh install --autostart [--stable] < PRIVATE_TELNET_LOGIN
+  sh sr7420-usb.sh install --autostart [--stable] --tnu USER --tnp 'PASSWORD'
   sh sr7420-usb.sh disable-autostart
   sh sr7420-usb.sh install --serial SERIAL --erase --url HTTPS_URL --sha256 SHA256
   sh sr7420-usb.sh verify --device /dev/sda
@@ -38,6 +39,8 @@ Options:
   --stable              Install only: request automatic readiness after one external confirmation.
   --autostart           Reuse a verified USB system and launch it after the stock host boots.
                         On setup, read the stock Telnet username and password as two lines on stdin.
+  --tnu USER            Stock Telnet username for --autostart; must be paired with --tnp.
+  --tnp PASSWORD        Stock Telnet password for --autostart; visible in process/history.
 The default offline bundle is next to this script. An installed valid system is
 reused without formatting or downloading. Booting requires stock Linux 5.4.196.
 EOF
@@ -60,6 +63,8 @@ while [ $# -gt 0 ]; do
   --retry) RETRY=1; shift;;
   --stable) STABLE=1; shift;;
   --autostart) AUTOSTART=1; shift;;
+  --tnu) [ $# -ge 2 ] || die 'missing Telnet username'; TNU=$2; TNU_SET=1; shift 2;;
+  --tnp) [ $# -ge 2 ] || die 'missing Telnet password'; TNP=$2; TNP_SET=1; shift 2;;
   --autostart-pin) [ $# -ge 2 ] || die 'missing autostart pin'; AUTO_PIN=$2; shift 2;;
   -h|--help) usage; exit 0;;
   *) die "unknown option $1";;
@@ -69,6 +74,8 @@ case "$CMD" in detect|install|verify|boot) :;; -h|--help|help) usage; exit 0;; *
 [ "$STABLE" = 0 ] || [ "$CMD" = install ] || die '--stable requires install (no --erase needed on verified USB)'
 [ "$AUTOSTART" = 0 ] || [ "$CMD:$ERASE:$BOOT_AFTER:$LOAD_ONLY:$RETRY" = install:0:0:0:0 ] ||
  die '--autostart requires install on an existing USB, without --erase, --boot, --load-only or --retry'
+[ "$TNU_SET" = "$TNP_SET" ] || die '--tnu and --tnp must be supplied together'
+[ "$TNU_SET" = 0 ] || [ "$CMD:$AUTOSTART" = install:1 ] || die '--tnu/--tnp require install --autostart'
 [ -z "$AUTO_PIN" ] || { [ "$CMD:$LOAD_ONLY:$RETRY" = boot:0:0 ] && [ -n "$SERIAL" ]; } || die 'invalid autostart boot arguments'
 [ "$(id -u)" = 0 ] || die 'run as root'
 if [ "$STABLE" = 1 ] || [ "$AUTOSTART" = 1 ] || [ -n "$AUTO_PIN" ]; then
@@ -417,7 +424,14 @@ if [ "$AUTOSTART" = 1 ]; then
  unmount_ours
  assert_not_mounted
  [ "$(serial_of "$DISK")" = "$ACTUAL_SERIAL" ] || die 'USB identity changed'
- sh "$SELF_DIR/autostart/manage.sh" install "$SELF_DIR" "$ACTUAL_SERIAL" "$pin" || die 'autostart setup failed'
+ if [ "$TNU_SET" = 1 ]; then
+  # The password is intentionally not put in the manage.sh argument list.
+  printf '%s\n%s\n' "$TNU" "$TNP" |
+   sh "$SELF_DIR/autostart/manage.sh" install "$SELF_DIR" "$ACTUAL_SERIAL" "$pin" || die 'autostart setup failed'
+  unset TNU TNP
+ else
+  sh "$SELF_DIR/autostart/manage.sh" install "$SELF_DIR" "$ACTUAL_SERIAL" "$pin" || die 'autostart setup failed'
+ fi
  exit 0
 fi
 if [ "$CMD" = install ] && [ "$BOOT_AFTER" = 0 ]; then
