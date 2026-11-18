@@ -1,0 +1,71 @@
+{
+  "verified_at_utc": "2026-11-18T06:46:13.465166+00:00",
+  "release_tag": "usb44-r2-20261118",
+  "bootstrap_source_commit": "67bd8e37323dc81135e23e577e3aa610c40408b5",
+  "bundle_sha256": "0936aaac1e8b3762dda9a4114feb0f17d7b1e81017ec20d2d4cb5d6961460e71",
+  "download_transport": {
+    "bootstrap": "immutable raw.githubusercontent.com URL",
+    "launcher_and_system": "GitHub Release HTTPS with redirects",
+    "certificate_verification": true,
+    "bootstrap_embeds_public_trust_anchors": true,
+    "uses_github_api": false,
+    "tls_verification_disabled": false
+  },
+  "online_install": {
+    "passed": true,
+    "offline_bundle_present": false,
+    "downloaded_bundle_before_formatting": true,
+    "boot_and_root_partitions_recreated": true,
+    "device_data_imported_locally": true,
+    "post_install_remount_and_hash_verification": true,
+    "elapsed_seconds": 61.78
+  },
+  "repeat_install": {
+    "passed": true,
+    "system_bundle_downloaded": false,
+    "formatted_again": false,
+    "launcher_downloaded_and_verified_again": true,
+    "elapsed_seconds": 14.66
+  },
+  "independent_verify": {
+    "passed": true,
+    "elapsed_seconds": 14.69
+  },
+  "failure_checks": {
+    "http_404_stops_before_erasure": true,
+    "bundle_hash_mismatch_stops_before_erasure": true,
+    "mounted_target_rejected": true,
+    "boot_partition_sha256_unchanged_after_all_three": true
+  },
+  "new_release_boot": {
+    "passed": true,
+    "kernel_release": "6.18.60",
+    "kernel_package_abi": "6.18.60~2b497291254683b6ce56b38338fafb7e-r1",
+    "writable_ext4_usb_root": true,
+    "reported_rootfs_type": "ext4",
+    "external_dhcp_lease_confirmed": true,
+    "ssh_default_login": true,
+    "luci_authenticated_http_status": 200,
+    "luci_network_write_permission": true,
+    "two_radios_up": true,
+    "external_confirmation_rc": 0,
+    "same_boot_observed_past_guard_seconds": 128.19,
+    "default_open_immortalwrt_ssids": true,
+    "default_repository": "sr7420-kmods-r2",
+    "apk_update_passed": true,
+    "distinct_packages_available": 11468,
+    "six_previously_missing_kmods_available": true,
+    "matched_crash_or_io_errors": false
+  },
+  "test_method": "Online install, reuse and verify were invoked separately; the installed release was then booted and externally confirmed. The combined --boot option uses the same installer path but was not separately reinstalled in one uninterrupted invocation.",
+  "limitations": {
+    "oem_web_upload_installation_verified": false,
+    "persistent_stock_autostart_installed": false,
+    "independent_switch_cold_boot_solved": false,
+    "smp_enabled": false,
+    "wifi_throughput_or_offload_verified": false,
+    "unconfirmed_boot_rolls_back": true,
+    "confirmation_required_each_boot": true
+  },
+  "contains_private_device_values": false
+}
