@@ -29,6 +29,10 @@ unexpected() { printf '%s\n' "$*" >>./unexpected; exit 78; }
 curl() { unexpected curl; }
 tar() { unexpected tar; }
 mknod() { unexpected mknod; }
+busybox() {
+ [ "$*" = --list ] || unexpected "busybox $*"
+ if [ -f ./no-setsid ]; then printf '%s\n' sh; else printf '%s\n' setsid; fi
+}
 sync() { :; }
 mount() {
  case "$*" in
@@ -69,7 +73,7 @@ class USBStableInstall(unittest.TestCase):
         data = {
             'stock-kernel': '5.4.196\n', 'proc/device-tree/model': 'ZTE 133\0',
             'proc/meminfo': 'MemAvailable: 500000 kB\n', 'proc/self/mountinfo': '',
-            'proc/swaps': '',
+            'proc/swaps': '', 'sys/kernel/kexec_loaded': '0\n',
             'sys/class/block/sda/device/vendor': 'SYNTHETIC\n',
             'sys/class/block/sda/device/model': 'USB\n',
             'sys/class/block/sda/removable': '1\n', 'sys/class/block/sda/ro': '0\n',
@@ -108,6 +112,7 @@ class USBStableInstall(unittest.TestCase):
             '/sys/class/block': './sys/class/block', '/proc/device-tree/model': './proc/device-tree/model',
             '/proc/self/mountinfo': './proc/self/mountinfo', '/proc/meminfo': './proc/meminfo',
             '/proc/swaps': './proc/swaps', '/tmp/sr7420-usb.lock': './tmp/sr7420-usb.lock',
+            '/sys/kernel/kexec_loaded': './sys/kernel/kexec_loaded', '/sbin/reboot': './stock-reboot',
             '/var/sr7420-usb-work.': './var/sr7420-usb-work.',
             '$WORK/boot': './boot', '$WORK/root': './root',
             '-b "/dev/$name"': '-f "./dev/$name"',
@@ -192,6 +197,17 @@ class USBStableInstall(unittest.TestCase):
         self.write('stock-kernel', b'6.18.60\n')
         self.assertIn('return to the validated stock system', self.run_installer(expected=1))
         self.assertFalse((self.work / 'mount-calls').exists())
+
+    def test_boot_without_stock_recovery_stops_before_loading_or_pending(self):
+        pending = self.work / 'boot/boot-pending'
+        pending.unlink()
+        self.assertIn('stock reboot command unavailable', self.run_installer(('boot',), expected=1))
+        self.write('stock-reboot', b'#!/bin/sh\nexit 77\n')
+        (self.work / 'stock-reboot').chmod(0o755)
+        self.write('no-setsid', b'')
+        self.assertIn('stock recovery cannot detach', self.run_installer(('boot',), expected=1))
+        self.assertFalse(pending.exists())
+        self.assertNotIn('-o rw', (self.work / 'mount-calls').read_text())
 
 
 if __name__ == '__main__':

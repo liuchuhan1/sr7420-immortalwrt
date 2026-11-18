@@ -1,0 +1,73 @@
+{
+  "date": "2026-11-18",
+  "devices_tested": 1,
+  "model": "SR7420",
+  "stock_kernel": "5.4.196",
+  "usb_kernel": "6.18.60",
+  "system_bundle_sha256": "0936aaac1e8b3762dda9a4114feb0f17d7b1e81017ec20d2d4cb5d6961460e71",
+  "stable_launcher_sha256": "dece6426644a34670cb3cfa40f53796cdc2a35c5ea8173a3a21a1a6ab7c507fa",
+  "revised_handover_launcher_sha256": "a73480f753f678c7e4043b9c5ad328af50c92929db2ed8ca4cf8c315247b6737",
+  "install": {
+    "existing_r2_verified_and_reused": true,
+    "system_bundle_downloaded": false,
+    "usb_formatted": false,
+    "policy_initially_unconfirmed": true
+  },
+  "first_boot": {
+    "verified_at_utc": "2026-11-18T14:17:29.640298+00:00",
+    "client_dhcp_lease_verified": true,
+    "authenticated_ssh": true,
+    "luci_login_and_network_permissions_verified": true,
+    "writable_usb_root": true,
+    "policy_pending_before_ssh_confirmation": true,
+    "policy_armed_after_guard_accepted_current_ssh_confirmation": true
+  },
+  "second_boot": {
+    "verified_at_utc": "2026-11-18T14:27:25.563206+00:00",
+    "client_dhcp_lease_verified": true,
+    "authenticated_ssh": true,
+    "luci_login_and_network_permissions_verified": true,
+    "writable_usb_root": true,
+    "external_ssh_confirmation_sent": false,
+    "local_readiness_and_guard_receipts_observed": true
+  },
+  "r2_readiness_failure": {
+    "verified_at_utc": "2026-11-18T14:40:06.895436+00:00",
+    "fault": "Temporarily move only the USB root's uhttpd startup link",
+    "client_dhcp_and_ssh_available": true,
+    "http_unavailable_and_readiness_check_failed": true,
+    "failed_boot_locally_confirmed": false,
+    "guard_120_second_deadline_receipt_observed": true,
+    "stock_reachable_after_guard": true,
+    "stock_boot_id_compared_before_and_after": false,
+    "client_wait_timed_out_before_stock_was_observed_later": true,
+    "pending_boot_retained_and_normal_relaunch_refused": true,
+    "usb_luci_startup_restored": true
+  },
+  "stock_handover_guard": {
+    "initial_handover_did_not_enter_r2": true,
+    "original_stock_sysrq_interface_missing": true,
+    "manual_stock_reboot_restored_wlan_and_cleared_staged_kernel": true,
+    "revised_guard_uses_stock_reboot": true,
+    "revised_guard_timeout_exercised_on_hardware": false
+  },
+  "recovery_with_revised_launcher": {
+    "verified_at_utc": "2026-11-18T14:42:34.505569+00:00",
+    "manual_retry_after_fixing_fault": true,
+    "client_dhcp_lease_verified": true,
+    "authenticated_ssh": true,
+    "luci_login_and_network_permissions_verified": true,
+    "external_ssh_confirmation_sent": false,
+    "local_readiness_and_guard_receipts_observed": true,
+    "same_r2_boot_observed_at_uptime_seconds": 195,
+    "writable_usb_root": true,
+    "both_radios_up": true
+  },
+  "limitations": {
+    "stock_autostart_implemented_or_installed": false,
+    "persistent_oem_boot_configuration_changed": false,
+    "firmware_slots_or_u_boot_written": false,
+    "hardware_hard_lockup_recovery_verified": false
+  },
+  "contains_private_device_values": false
+}

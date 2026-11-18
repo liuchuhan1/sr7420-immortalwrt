@@ -356,6 +356,10 @@ fi
 [ "$(uname -r)" = 5.4.196 ] || die 'boot currently supports only the validated stock 5.4.196 handover'
 if [ -e "$BM/boot-pending" ] && [ "$RETRY" = 0 ]; then die 'previous USB boot was not confirmed ready; stock system retained (manual --retry required)'; fi
 [ "$(cat /sys/kernel/kexec_loaded)" = 0 ] || die 'a kernel is already loaded; refusing to replace it'
+if [ "$LOAD_ONLY" = 0 ]; then
+ [ -x /sbin/reboot ] || die 'stock reboot command unavailable; not attempting handover'
+ busybox --list | grep -q '^setsid$' || die 'stock recovery cannot detach; not attempting handover'
+fi
 # The loader must remain executable after unmounting the USB partitions.
 STAGE=/var/sr7420-usb-boot
 [ ! -e "$STAGE" ] || die 'loader stage already exists; inspect before reusing'
@@ -381,8 +385,8 @@ printf '%s\n' "$RELEASE" >"$BM/boot-pending"
 [ "$(cat "$BM/boot-pending")" = "$RELEASE" ] || die 'pending state read-back failed'
 sync
 unmount_ours
-# Tested stock WLAN teardown, with an independent old-kernel recovery deadline.
-busybox setsid sh -c 'sleep 120; echo b >/proc/sysrq-trigger' </dev/null >"$STAGE/stock-guard.log" 2>&1 &
+# The stock build has no sysrq-trigger. Keep recovery independent of the login.
+busybox setsid sh -c 'sleep 120 && sync && exec /sbin/reboot' </dev/null >"$STAGE/stock-guard.log" 2>&1 &
 for n in mld0 mld1; do [ ! -e "/sys/class/net/$n" ] || ifconfig "$n" down; done
 for f in /sys/class/net/wlan*; do [ -d "$f" ] || continue; ifconfig "${f##*/}" down; done
 for f in /sys/class/net/wlan*; do [ -d "$f" ] || continue; wlanconfig "${f##*/}" destroy; done
