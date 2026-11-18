@@ -1,6 +1,6 @@
 #!/bin/sh
 # SR7420 USB installer/launcher. Format only an explicitly authorized USB serial.
-# No MTD, U-Boot environment, or firmware-slot writes are performed.
+# No raw flash, U-Boot environment, or firmware-slot writes are performed.
 set -eu
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -10,8 +10,9 @@ DEFAULT_SHA=__BUNDLE_SHA256__
 case "$0" in */*) SELF_BASE=${0%/*};; *) SELF_BASE=.;; esac
 SELF_DIR=$(CDPATH= cd "$SELF_BASE" && pwd)
 CMD=${1:-install}; [ $# -eq 0 ] || shift
-DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 STABLE=0 WORK_MOUNTED=0
+DEV= SERIAL= OFFLINE= URL= WANT_SHA= ERASE=0 HTTP_LOCAL=0 LOAD_ONLY=0 BOOT_AFTER=0 RETRY=0 STABLE=0 AUTOSTART=0 WORK_MOUNTED=0
 WORK= BM= RM= POLICY_STAGE= REQUEST_STAGE= LOCKED=0 KERNEL_LOADED_BY_US=0
+AUTO_PIN=
 log() { printf '%s\n' "SR7420-USB: $*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 usage() {
@@ -20,6 +21,8 @@ Usage:
   sh sr7420-usb.sh detect
   sh sr7420-usb.sh install --device /dev/sda --serial SERIAL --erase [--offline FILE] [--stable]
   sh sr7420-usb.sh install --stable  # reuse a verified existing system; never erase
+  sh sr7420-usb.sh install --autostart [--stable] < PRIVATE_TELNET_LOGIN
+  sh sr7420-usb.sh disable-autostart
   sh sr7420-usb.sh install --serial SERIAL --erase --url HTTPS_URL --sha256 SHA256
   sh sr7420-usb.sh verify --device /dev/sda
   sh sr7420-usb.sh boot --device /dev/sda [--load-only]
@@ -33,10 +36,16 @@ Options:
   --boot                After installation, boot when running the stock kernel.
   --retry               Retry a previous failed USB boot; automatic retries are blocked.
   --stable              Install only: request automatic readiness after one external confirmation.
+  --autostart           Reuse a verified USB system and launch it after the stock host boots.
+                        On setup, read the stock Telnet username and password as two lines on stdin.
 The default offline bundle is next to this script. An installed valid system is
 reused without formatting or downloading. Booting requires stock Linux 5.4.196.
 EOF
 }
+if [ "$CMD" = disable-autostart ]; then
+ [ "$#" -eq 0 ] || die 'disable-autostart takes no options'
+ exec sh "$SELF_DIR/autostart/manage.sh" disable
+fi
 while [ $# -gt 0 ]; do
  case "$1" in
   --device) [ $# -ge 2 ] || die 'missing device'; DEV=$2; shift 2;;
@@ -50,18 +59,22 @@ while [ $# -gt 0 ]; do
   --boot) BOOT_AFTER=1; shift;;
   --retry) RETRY=1; shift;;
   --stable) STABLE=1; shift;;
-  --autostart) die 'no supported stock startup hook; nothing changed';;
+  --autostart) AUTOSTART=1; shift;;
+  --autostart-pin) [ $# -ge 2 ] || die 'missing autostart pin'; AUTO_PIN=$2; shift 2;;
   -h|--help) usage; exit 0;;
   *) die "unknown option $1";;
  esac
 done
 case "$CMD" in detect|install|verify|boot) :;; -h|--help|help) usage; exit 0;; *) usage; exit 1;; esac
 [ "$STABLE" = 0 ] || [ "$CMD" = install ] || die '--stable requires install (no --erase needed on verified USB)'
+[ "$AUTOSTART" = 0 ] || [ "$CMD:$ERASE:$BOOT_AFTER:$LOAD_ONLY:$RETRY" = install:0:0:0:0 ] ||
+ die '--autostart requires install on an existing USB, without --erase, --boot, --load-only or --retry'
+[ -z "$AUTO_PIN" ] || { [ "$CMD:$LOAD_ONLY:$RETRY" = boot:0:0 ] && [ -n "$SERIAL" ]; } || die 'invalid autostart boot arguments'
 [ "$(id -u)" = 0 ] || die 'run as root'
-if [ "$STABLE" = 1 ]; then
- [ "$(uname -r)" = 5.4.196 ] || die 'return to the validated stock system before enabling stable mode'
+if [ "$STABLE" = 1 ] || [ "$AUTOSTART" = 1 ] || [ -n "$AUTO_PIN" ]; then
+ [ "$(uname -r)" = 5.4.196 ] || die 'return to the validated stock system before enabling these options'
  [ "$(tr -d '\000\r\n' </proc/device-tree/model)" = 'ZTE 133' ] || die 'unexpected stock board; USB unchanged'
- [ "${WANT_SHA:-$DEFAULT_SHA}" = "$DEFAULT_SHA" ] || die '--stable requires the launcher default bundle identity'
+ [ "${WANT_SHA:-$DEFAULT_SHA}" = "$DEFAULT_SHA" ] || die 'these options require the launcher default bundle identity'
 fi
 [ -d /sys/class/block ] || die 'sysfs is required'
 [ -r /proc/self/mountinfo ] || die 'mountinfo is required'
@@ -101,13 +114,46 @@ list_usb() {
  for x in /sys/class/block/sd*; do
   [ -e "$x" ] || continue
   d=${x##*/}; is_usb "$d" || continue
-  z=$(cat "$x/size"); sn=$(serial_of "$d")
-  vendor=$(tr -d '\r\n' <"$x/device/vendor")
-  model=$(tr -d '\r\n' <"$x/device/model")
-  log "USB device=/dev/$d serial=$sn sectors=$z vendor=$vendor model=$model"
   FOUND=/dev/$d; COUNT=$((COUNT+1))
+  if [ "$#" = 0 ]; then
+   z=$(cat "$x/size"); sn=$(serial_of "$d")
+   vendor=$(tr -d '\r\n' <"$x/device/vendor")
+   model=$(tr -d '\r\n' <"$x/device/model")
+   log "USB device=/dev/$d serial=$sn sectors=$z vendor=$vendor model=$model"
+  fi
  done
 }
+check_autostart_enabled() {
+ [ -n "$AUTO_PIN" ] || return 0
+ enabled=/Plugin/sr7420-usb-autostart/enabled
+ [ -f "$enabled" ] && [ ! -L "$enabled" ] && [ "$(cat "$enabled" 2>/dev/null)" = "$RELEASE" ] ||
+  die 'autostart disabled; stock system retained'
+}
+wait_for_autostart_usb() {
+ # Wait only for enumeration. Validation or handover failures are never retried.
+ n=0
+ while :; do
+  check_autostart_enabled
+  list_usb quiet
+  [ "$COUNT" -le 1 ] || die 'multiple removable USB disks; autostart skipped'
+  if [ "$COUNT" = 1 ]; then
+   device=${FOUND##*/}
+   detected=$(serial_of "$device" 2>/dev/null || :)
+   if [ -n "$detected" ]; then
+    [ "$detected" = "$SERIAL" ] || die 'USB serial does not match autostart configuration'
+    if [ -r "/sys/class/block/${device}1/dev" ] && [ -r "/sys/class/block/${device}2/dev" ]; then
+     log "autostart USB ready after $((n*2)) seconds of enumeration wait"
+     return 0
+    fi
+   fi
+  fi
+  [ "$n" -lt 75 ] || die 'autostart USB enumeration timed out; stock system retained'
+  [ "$n" != 0 ] || log 'waiting up to 150 seconds for the configured USB disk and partitions'
+  sleep 2
+  n=$((n+1))
+ done
+}
+if [ -n "$AUTO_PIN" ]; then wait_for_autostart_usb; fi
 list_usb
 [ "$COUNT" -gt 0 ] || die 'no removable USB disk detected; no disk has been changed'
 [ "$CMD" != detect ] || exit 0
@@ -168,12 +214,30 @@ verify_manifest() {
   [ "$(hash_file "$base/$name")" = "$digest" ] || return 1
  done <"$manifest"
 }
+manifest_pin() (
+ pins=
+ for file in "$@"; do
+  digest=$(hash_file "$file")
+  case "$digest" in *[!0-9a-f]*|'') exit 1;; esac
+  [ "${#digest}" = 64 ] || exit 1
+  pins=${pins:+$pins:}$digest
+ done
+ printf '%s\n' "$pins"
+)
+usb_pin() {
+ manifest_pin "$BM/boot.sha256" "$BM/device.sha256" "$BM/root.sha256" "$RM/etc/sr7420-device.sha256"
+}
 verify_policy_payload() {
  [ "$(awk '{print $2}' "$SELF_DIR/policy/policy.sha256")" = "$(printf '%s\n' etc/init.d/sr7420-usb-policy usr/sbin/sr7420-usb-policy)" ] &&
  verify_manifest "$SELF_DIR/policy" "$SELF_DIR/policy/policy.sha256"
 }
 if [ "$STABLE" = 1 ]; then
  verify_policy_payload || die 'missing or invalid stable policy payload; USB unchanged'
+fi
+if [ "$AUTOSTART" = 1 ]; then
+ [ "$COUNT" = 1 ] || die '--autostart requires exactly one removable USB disk'
+ [ "$(awk '{print $2}' "$SELF_DIR/autostart/autostart.sha256")" = "$(printf '%s\n' guest-config.sh guest.sh host.sh manage.sh)" ] &&
+  verify_manifest "$SELF_DIR/autostart" "$SELF_DIR/autostart/autostart.sha256" || die 'missing or invalid autostart payload; USB unchanged'
 fi
 unmount_ours() {
  [ -z "$RM" ] || { umount "$RM"; RM=; }
@@ -347,6 +411,15 @@ if [ "$STABLE" = 1 ]; then
  probe_installed || die 'USB verification after policy installation failed'
  log 'stable requested; first successful boot still requires external confirmation unless already confirmed for this policy'
 fi
+if [ "$AUTOSTART" = 1 ]; then
+ [ "$INSTALLED" = 1 ] || die '--autostart requires a verified r2 installation'
+ pin=$(usb_pin) || die 'cannot pin USB manifests for autostart'
+ unmount_ours
+ assert_not_mounted
+ [ "$(serial_of "$DISK")" = "$ACTUAL_SERIAL" ] || die 'USB identity changed'
+ sh "$SELF_DIR/autostart/manage.sh" install "$SELF_DIR" "$ACTUAL_SERIAL" "$pin" || die 'autostart setup failed'
+ exit 0
+fi
 if [ "$CMD" = install ] && [ "$BOOT_AFTER" = 0 ]; then
  log 'ready; invoke the boot command from the stock system to switch kernels'
  exit 0
@@ -355,7 +428,9 @@ fi
 [ "$COUNT" = 1 ] || die 'boot currently requires exactly one removable USB disk'
 [ "$(uname -r)" = 5.4.196 ] || die 'boot currently supports only the validated stock 5.4.196 handover'
 if [ -e "$BM/boot-pending" ] && [ "$RETRY" = 0 ]; then die 'previous USB boot was not confirmed ready; stock system retained (manual --retry required)'; fi
+[ -z "$AUTO_PIN" ] || [ "$(usb_pin)" = "$AUTO_PIN" ] || die 'USB manifests changed since autostart was enabled'
 [ "$(cat /sys/kernel/kexec_loaded)" = 0 ] || die 'a kernel is already loaded; refusing to replace it'
+check_autostart_enabled
 if [ "$LOAD_ONLY" = 0 ]; then
  [ -x /sbin/reboot ] || die 'stock reboot command unavailable; not attempting handover'
  busybox --list | grep -q '^setsid$' || die 'stock recovery cannot detach; not attempting handover'
@@ -368,6 +443,10 @@ mkdir -m 700 "$STAGE"
 cp -a "$BM/." "$STAGE/"
 verify_manifest "$STAGE" "$STAGE/boot.sha256" || die 'loader-stage checksum mismatch'
 verify_manifest "$STAGE" "$STAGE/device.sha256" || die 'device DTB checksum mismatch' 
+if [ -n "$AUTO_PIN" ]; then
+ boot_pin=${AUTO_PIN%:*}; boot_pin=${boot_pin%:*}
+ [ "$(manifest_pin "$STAGE/boot.sha256" "$STAGE/device.sha256")" = "$boot_pin" ] || die 'staged USB boot manifests changed'
+fi
 [ -x "$STAGE/kexec" ] && [ -x "$STAGE/pci-quiesce" ] || die 'loader-stage tools are not executable'
 CMDLINE="console=ttyAMA0,115200n8 earlycon=sr7420ram,mmio,0xb52f0000 keep_bootcon loglevel=6 nosmp panic=15 sr7420_usb_serial=$ACTUAL_SERIAL"
 "$STAGE/kexec" -c -l "$STAGE/Image" --dtb="$STAGE/board.dtb" --append="$CMDLINE"
@@ -375,6 +454,7 @@ CMDLINE="console=ttyAMA0,115200n8 earlycon=sr7420ram,mmio,0xb52f0000 keep_bootco
 KERNEL_LOADED_BY_US=1
 log 'USB kernel and DTB loaded into RAM'
 if [ "$LOAD_ONLY" = 1 ]; then KERNEL_LOADED_BY_US=0; exit 0; fi
+check_autostart_enabled
 # Stock BusyBox can report a successful remount while retaining ro,noload.
 umount "$BM" || die 'cannot close read-only boot probe'
 BM=

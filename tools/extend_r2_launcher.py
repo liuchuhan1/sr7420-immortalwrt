@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add optional USB stable mode without repacking the published r2 system."""
+"""Add optional stable mode and autostart without repacking the published r2 system."""
 import argparse
 import gzip
 import hashlib
@@ -9,7 +9,7 @@ import posixpath
 import tarfile
 from pathlib import Path, PurePosixPath
 
-from stable_payload import stable_payload
+from stable_payload import autostart_payload, stable_payload
 from usb_artifacts import sha256
 
 
@@ -74,8 +74,9 @@ def build(original, output):
     if b'__BUNDLE_' in script:
         raise ValueError('Unsubstituted bundle field')
     put('sr7420-usb.sh', script, 0o755)
-    for name, (data, mode) in stable_payload(repo).items():
-        put('policy/' + name, data, mode)
+    for directory, payload in (('policy', stable_payload(repo)), ('autostart', autostart_payload(repo))):
+        for name, (data, mode) in payload.items():
+            put(directory + '/' + name, data, mode)
     manifest = ''.join(f'{digest(file_data(name))}  {name}\n'
                        for name, (info, _) in sorted(entries.items())
                        if not info.isdir() and name != 'launcher.sha256')
@@ -94,7 +95,7 @@ def build(original, output):
     return {'base_launcher_sha256': BASE_SHA, 'system_bundle_sha256': BUNDLE_SHA,
             'system_bundle_repacked': False, 'launcher_sha256': sha256(output),
             'launcher_bytes': output.stat().st_size, 'installer_sha256': digest(script),
-            'stock_autostart_supported': False, 'hardware_verified': False}
+            'stock_autostart_backend': 'nativeC-loopback-telnet', 'hardware_verified': False}
 
 
 if __name__ == '__main__':

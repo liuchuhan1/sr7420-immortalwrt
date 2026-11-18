@@ -10,7 +10,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / 'tools'))
-from stable_payload import stable_payload
+from stable_payload import autostart_payload, stable_payload
 
 SHELL = os.environ.get('SR7420_TEST_SHELL', 'sh')
 BUNDLE = 'a' * 64
@@ -34,6 +34,14 @@ busybox() {
  if [ -f ./no-setsid ]; then printf '%s\n' sh; else printf '%s\n' setsid; fi
 }
 sync() { :; }
+sleep() {
+ [ "$*" = 2 ] || unexpected "sleep $*"
+ printf '%s\n' "$1" >>./enumeration-waits
+ if [ -f ./delayed-partition ]; then
+  mv ./delayed-partition ./sys/class/block/sda2/dev
+ fi
+ if [ -f ./disable-during-wait ]; then rm -f ./autostart-enabled; fi
+}
 mount() {
  case "$*" in
  '-t tmpfs -o size=196608k,mode=700 tmpfs ./var/sr7420-usb-work.'[0-9]*) :;;
@@ -74,6 +82,7 @@ class USBStableInstall(unittest.TestCase):
             'stock-kernel': '5.4.196\n', 'proc/device-tree/model': 'ZTE 133\0',
             'proc/meminfo': 'MemAvailable: 500000 kB\n', 'proc/self/mountinfo': '',
             'proc/swaps': '', 'sys/kernel/kexec_loaded': '0\n',
+            'autostart-enabled': 'sr7420-usb44\n',
             'sys/class/block/sda/device/vendor': 'SYNTHETIC\n',
             'sys/class/block/sda/device/model': 'USB\n',
             'sys/class/block/sda/removable': '1\n', 'sys/class/block/sda/ro': '0\n',
@@ -107,12 +116,14 @@ class USBStableInstall(unittest.TestCase):
 
         source = (REPO / 'installer/sr7420-usb.sh.in').read_text(encoding='utf-8')
         source = source.replace('mkdir "$WORK/boot" "$WORK/root"', ':')
+        source = source.replace('"$n" -lt 75', '"$n" -lt 3')
         for original, fixture in {
             '__BUNDLE_SHA256__': BUNDLE, '__BUNDLE_URL__': 'https://example.invalid/bundle.tar.gz',
             '/sys/class/block': './sys/class/block', '/proc/device-tree/model': './proc/device-tree/model',
             '/proc/self/mountinfo': './proc/self/mountinfo', '/proc/meminfo': './proc/meminfo',
             '/proc/swaps': './proc/swaps', '/tmp/sr7420-usb.lock': './tmp/sr7420-usb.lock',
             '/sys/kernel/kexec_loaded': './sys/kernel/kexec_loaded', '/sbin/reboot': './stock-reboot',
+            '/Plugin/sr7420-usb-autostart/enabled': './autostart-enabled',
             '/var/sr7420-usb-work.': './var/sr7420-usb-work.',
             '$WORK/boot': './boot', '$WORK/root': './root',
             '-b "/dev/$name"': '-f "./dev/$name"',
@@ -192,10 +203,83 @@ class USBStableInstall(unittest.TestCase):
 
     def test_wrong_modes_stop_without_mounting(self):
         self.assertIn('requires install', self.run_installer(('boot', '--stable'), expected=1))
-        self.assertIn('no supported stock startup hook', self.run_installer(
-            ('install', '--stable', '--autostart'), expected=1))
+        for option in ('--erase', '--boot', '--retry', '--load-only'):
+            args = ('install', '--stable', '--autostart', option)
+            self.assertIn('--autostart requires install', self.run_installer(args, expected=1))
+        self.assertIn('--autostart requires install', self.run_installer(('boot', '--autostart'), expected=1))
         self.write('stock-kernel', b'6.18.60\n')
         self.assertIn('return to the validated stock system', self.run_installer(expected=1))
+        self.assertFalse((self.work / 'mount-calls').exists())
+
+    def autostart_fixture(self):
+        for name, (payload, _) in autostart_payload(REPO).items():
+            self.write('autostart/' + name, payload)
+        self.write('autostart/manage.sh', b'#!/bin/sh\nprintf "%s\\n" "$@" >./autostart-called\n')
+        names = ['guest-config.sh', 'guest.sh', 'host.sh', 'manage.sh']
+        self.manifest('autostart', 'autostart/autostart.sha256', names)
+
+    def test_autostart_only_verifies_existing_media_then_calls_manager(self):
+        self.autostart_fixture()
+        self.run_installer(('install', '--autostart'))
+        arguments = (self.work / 'autostart-called').read_text().splitlines()
+        self.assertEqual(arguments[0::2], ['install', SERIAL])
+        manifests = ['boot/boot.sha256', 'boot/device.sha256', 'boot/root.sha256', 'root/etc/sr7420-device.sha256']
+        self.assertEqual(arguments[3], ':'.join(hashlib.sha256((self.work / p).read_bytes()).hexdigest() for p in manifests))
+        self.assertNotIn('-o rw', (self.work / 'mount-calls').read_text())
+        self.assertFalse((self.work / 'boot/stable-request').exists())
+        self.assertEqual((self.work / 'boot/boot-pending').read_text(), 'sr7420-usb44\n')
+
+    def test_autostart_and_stable_share_one_verified_usb(self):
+        self.autostart_fixture()
+        self.assertIn('stable requested', self.run_installer(('install', '--stable', '--autostart')))
+        self.assertTrue((self.work / 'autostart-called').exists())
+        self.assertTrue((self.work / 'boot/stable-request').exists())
+
+    def test_corrupt_autostart_payload_fails_before_usb_mount(self):
+        self.autostart_fixture()
+        self.write('autostart/guest.sh', b'invalid')
+        self.assertIn('invalid autostart payload', self.run_installer(('install', '--autostart'), expected=1))
+        self.assertNotIn('ext4', (self.work / 'mount-calls').read_text())
+        self.assertFalse((self.work / 'autostart-called').exists())
+
+    def attempt_auto_boot(self):
+        return self.run_installer(
+            ('boot', '--serial', SERIAL, '--autostart-pin', ':'.join(['0' * 64] * 4)), expected=1)
+
+    def test_changed_usb_manifest_pin_blocks_autostart_before_handover(self):
+        (self.work / 'boot/boot-pending').unlink()
+        self.assertIn('USB manifests changed', self.attempt_auto_boot())
+        self.assertFalse((self.work / 'boot/boot-pending').exists())
+        self.assertNotIn('-o rw', (self.work / 'mount-calls').read_text())
+
+    def test_autostart_waits_for_partitions_then_respects_pending(self):
+        (self.work / 'sys/class/block/sda2/dev').rename(self.work / 'delayed-partition')
+        output = self.attempt_auto_boot()
+        self.assertIn('USB ready after 2 seconds', output)
+        self.assertIn('previous USB boot was not confirmed ready', output)
+        self.assertEqual((self.work / 'enumeration-waits').read_text().splitlines(), ['2'])
+        self.assertEqual((self.work / 'boot/boot-pending').read_text(), 'sr7420-usb44\n')
+        self.assertNotIn('-o rw', (self.work / 'mount-calls').read_text())
+
+    def test_missing_usb_times_out_before_mounting(self):
+        (self.work / 'sys/class/block/sda').rename(self.work / 'unavailable-disk')
+        (self.work / 'boot/boot-pending').unlink()
+        self.assertIn('USB enumeration timed out', self.attempt_auto_boot())
+        self.assertEqual((self.work / 'enumeration-waits').read_text().splitlines(), ['2'] * 3)
+        self.assertFalse((self.work / 'mount-calls').exists())
+        self.assertFalse((self.work / 'boot/boot-pending').exists())
+
+    def test_wrong_usb_is_refused_without_waiting(self):
+        self.write('sys/devices/usb1/fixture/serial', b'ANOTHER-USB\n')
+        self.assertIn('USB serial does not match autostart configuration', self.attempt_auto_boot())
+        self.assertFalse((self.work / 'enumeration-waits').exists())
+        self.assertFalse((self.work / 'mount-calls').exists())
+
+    def test_disabling_stops_enumeration_without_mounting(self):
+        (self.work / 'sys/class/block/sda2/dev').unlink()
+        self.write('disable-during-wait', b'')
+        self.assertIn('autostart disabled', self.attempt_auto_boot())
+        self.assertEqual((self.work / 'enumeration-waits').read_text().splitlines(), ['2'])
         self.assertFalse((self.work / 'mount-calls').exists())
 
     def test_boot_without_stock_recovery_stops_before_loading_or_pending(self):

@@ -65,7 +65,7 @@ python3 tools/build_kexec.py --source /path/to/kexec-tools-2.0.28 \
 - `kexec-tools-corresponding-source.tar.gz` 和 `COPYING.kexec`：与发布二进制配套保存。
 - `bundle-report.json`：实际大小、哈希、内核 ABI 与验证状态。
 
-两个 USB 包需要配套使用；离线包应放在启动脚本旁边。自启脚本仍需要经过验证的原厂持久入口，发行脚本不会自行猜测或安装未知 hook。不要把这些 tar 包上传到原厂升级页。
+两个 USB 包需要配套使用；离线包应放在启动脚本旁边。增强启动器的 `--autostart` 只支持明确核对过配置的原厂 `nativeC` 环境，详见 [单机自启](USB-STABLE.md#单机自启)。不要把这些 tar 包上传到原厂升级页。
 
 ## 发布前检查
 

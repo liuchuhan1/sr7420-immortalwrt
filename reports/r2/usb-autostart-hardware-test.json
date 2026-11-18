@@ -1,0 +1,95 @@
+{
+  "date_utc": "2026-11-18",
+  "devices_tested": 1,
+  "model": "SR7420",
+  "stock_kernel": "5.4.196",
+  "usb_kernel": "6.18.60",
+  "backend": "nativeC-loopback-telnet",
+  "launcher_sha256": "5184c4da3fa41ac9a4ebd107cec65ffe291af187257b5095dd5e1539adc9ab51",
+  "system_bundle_sha256": "0936aaac1e8b3762dda9a4114feb0f17d7b1e81017ec20d2d4cb5d6961460e71",
+  "system_bundle_repacked": false,
+  "initial_attempt": {
+    "launcher_sha256": "e5c4a99cd29afa7ca868a7f0826c17278ab3b5bb20c9b2ad45bb026f5de4de53",
+    "container_queued_launch": true,
+    "usb_disk_enumerated_after_one_shot_probe": true,
+    "stock_retained_without_boot_pending": true,
+    "fix": "Wait for the enrolled disk and both partitions before one launch; up to 150 seconds of enumeration wait."
+  },
+  "setup": {
+    "verified_at_utc": "2026-11-18T16:56:48Z",
+    "authorized_loopback_login_probe_passed": true,
+    "managed_once_hook_verified": true,
+    "saved_login_mode": "0600",
+    "existing_r2_reused": true,
+    "usb_formatted": false,
+    "system_bundle_downloaded": false,
+    "existing_stable_confirmation_preserved": true,
+    "kernel_loaded_during_setup": false
+  },
+  "autonomous_boot": {
+    "verified_at_utc": "2026-11-18T17:00:57Z",
+    "initiator": "normal stock software reboot",
+    "external_usb_launch_command_sent": false,
+    "external_ssh_confirmation_sent": false,
+    "new_r2_boot_id_verified": true,
+    "observer_seconds_to_dhcp_and_ssh_port": 209.05,
+    "client_dhcp_lease_verified": true,
+    "authenticated_ssh": true,
+    "luci_login_and_network_permissions_verified": true,
+    "writable_usb_ext4_root": true,
+    "local_stable_ready_and_guard_acceptance_verified": true,
+    "external_confirmation_receipt_for_this_boot": false,
+    "same_r2_boot_at_uptime_seconds": 234
+  },
+  "readiness_fault": {
+    "verified_at_utc": "2026-11-18T17:14:38Z",
+    "fault": "Temporarily move only the USB root's uhttpd startup link.",
+    "new_r2_boot_after_software_reboot_without_external_launch": true,
+    "client_dhcp_and_ssh_available": true,
+    "luci_unavailable_and_readiness_check_refused": true,
+    "local_or_external_confirmation_for_faulted_boot": false,
+    "r2_guard_120_second_deadline_receipt_observed": true,
+    "returned_to_stock": true,
+    "pending_and_previous_good_confirmation_retained": true,
+    "next_autostart_refused_pending": true,
+    "kernel_loaded_after_refusal": false,
+    "luci_startup_link_restored": true
+  },
+  "disable_autostart": {
+    "verified_at_utc": "2026-11-18T17:15:14Z",
+    "original_guest_startup_table_restored": true,
+    "saved_login_removed": true,
+    "stock_autostart_state_removed": true,
+    "usb_pending_and_stable_receipts_unchanged": true
+  },
+  "recovery": {
+    "verified_at_utc": "2026-11-18T17:20:52Z",
+    "autostart_reenabled_without_clearing_pending": true,
+    "manual_retry_sent_after_luci_restoration": true,
+    "telnet_handover_receipt_missing": true,
+    "new_boot_verified_independently_on_r2": true,
+    "client_dhcp_lease_verified": true,
+    "authenticated_ssh": true,
+    "luci_login_and_network_permissions_verified": true,
+    "writable_usb_ext4_root": true,
+    "local_stable_ready_and_guard_acceptance_verified": true,
+    "external_ssh_confirmation_sent": false,
+    "pending_cleared_and_current_boot_ready": true,
+    "observed_uptime_seconds": 207,
+    "both_radios_up": true
+  },
+  "validation": {
+    "focused_offline_tests_passed": 27,
+    "launcher_archive_privacy_scan_passed": true,
+    "reviewed_match": "Identical public GitHub download URL in the original launcher."
+  },
+  "limitations": {
+    "software_reboot_test_only": true,
+    "physical_power_cycle_verified": false,
+    "new_first_confirmation_with_autostart_tested": false,
+    "stock_handover_guard_timeout_tested": false,
+    "hard_lockup_recovery_tested": false,
+    "firmware_slots_or_u_boot_written": false
+  },
+  "contains_private_device_values": false
+}

@@ -37,7 +37,7 @@
   ],
   "blockers": [
     "Vendor firmware upload requires a verified accepted installer format",
-    "Vendor persistent boot hook and unattended rollback flow are not yet verified",
+    "Stock USB autostart has not been tested after a physical power cycle",
     "SMP and independent switch cold boot remain incomplete"
   ],
   "build_host_available": true,
@@ -67,6 +67,11 @@
   "luci_authenticated_verified": true,
   "repackaged_release_hardware_retest": false,
   "usb_running_r2_hardware_verified": true,
+  "stock_usb_autostart": {
+    "software_reboot_verified": true,
+    "physical_power_cycle_verified": false,
+    "report": "reports/r2/usb-autostart-hardware-test.json"
+  },
   "kmod_repository": "sr7420-kmods-r2",
   "repository_apk_update_verified": true
 }
