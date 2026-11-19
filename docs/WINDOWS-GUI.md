@@ -1,6 +1,6 @@
 # Windows Telnet 与 USB GUI 使用说明
 
-**发布状态：**GitHub Release 目前尚未附上 GUI EXE；这份文档说明已完成的 GUI 使用流程，不代表已有公开下载附件。
+这份文档说明已完成的 GUI 使用流程。
 
 Windows GUI 面向设备所有者，限定用于已经验证的 ZTE SR7420 / 原厂 Linux 5.4.196 组合。它通过原厂管理网页生成 LAN root Telnet 配置，再用固定校验值的 USB44 r2 launcher 操作 U 盘。它不是原厂网页升级文件，也不能用于其他型号。
 
