@@ -2,11 +2,11 @@
 
 这是 SR7420 的开发移植、补丁和 USB 系统切换工具源码。目前不提供可直接交给原厂升级页的刷机包。
 
-[下载 USB44 r2 实验预发布](https://github.com/liuchuhan1/sr7420-immortalwrt/releases/tag/usb44-r2-20261118) · [一行安装命令](docs/INSTALL-R2-ONE-LINE.sh) · [完整安装说明](docs/INSTALLER.md) · [r2 模块软件源](docs/REPOSITORIES.md)
+[下载 USB44 r2 实验预发布](https://github.com/liuchuhan1/sr7420-immortalwrt/releases/tag/usb44-r2-20261118) · [一行安装命令](docs/INSTALL-R2-ONE-LINE.sh) · [完整安装说明](docs/INSTALLER.md) · [Windows GUI 使用说明](docs/WINDOWS-GUI.md) · [r2 模块软件源](docs/REPOSITORIES.md)
 
 ## 快速开始：从原厂启动 U 盘系统
 
-当前方案是在原厂完成硬件初始化后，通过 kexec 启动 U 盘中的 ImmortalWrt，使用可写 ext4 根分区；这不是 LXC 容器。需要已获授权的原厂 root shell，仅验证过原厂 Linux `5.4.196`。网页上传安装和原厂开机自启仍未完成。
+当前方案是在原厂完成硬件初始化后，通过 kexec 启动 U 盘中的 ImmortalWrt，使用可写 ext4 根分区；这不是 LXC 容器。需要已获授权的原厂 root shell，仅验证过原厂 Linux `5.4.196`。原厂网页升级页不支持此 USB 系统包；受支持的持久自启仅通过 Windows GUI 配置。
 
 1. 备份 U 盘数据，只接入一块准备安装的 U 盘。在 [一行安装命令](docs/INSTALL-R2-ONE-LINE.sh) 中复制最后一整行，在原厂 root shell 执行。命令会从 GitHub 下载固定 r2 发行包并校验，**需要安装时会清空唯一符合条件的 U 盘**；已有完整、校验通过的同版系统会复用。
 2. 安装结束仍停留在原厂系统。准备好承受网络中断后，复制 [一行启动命令](docs/BOOT-R2-ONE-LINE.sh) 的最后一整行，在原厂 root shell 执行，切换到已安装的 U 盘系统。
@@ -35,7 +35,7 @@
 | USB44 r2 在线安装与启动器 | 原厂一行命令在线下载安装、重复复用及新发布归档启动均已实机验证 |
 | 双核、交换机独立冷启动 | 未完成 |
 | 原厂配置恢复/升级页一次上传安装 | 未验证，不生成伪装的原厂升级包 |
-| 原厂持久自启入口 | 尚未验证，自动化部署未完成 |
+| 原厂持久自启入口 | 通过 Windows GUI 配置；首次启动仍须外部确认 |
 
 源码固定 Linux **6.18.60**、无线 backports **6.18.26**。保留已经验证的 warm handover 与双无线 vendor ABI 适配。`nosmp` 仍是启动条件，不宣称双核支持。
 
